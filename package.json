@@ -1,0 +1,22 @@
+{
+  "name": "charterflow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CharterFlow: Multi-Round Grant Coordination Protocol on GenLayer",
+  "scripts": {
+    "test:contracts": "pytest tests/test_charterflow_core.py",
+    "test:safety": "node scripts/test_runner_safety.js",
+    "test:frontend-reads": "npx tsx scripts/test_frontend_reads.ts",
+    "test:frontend-writes": "npx tsx scripts/test_frontend_writes.ts",
+    "test": "node scripts/test_runner_safety.js",
+    "build:frontend": "npm --prefix frontend run build",
+    "lint:frontend": "npm --prefix frontend run lint"
+  },
+  "dependencies": {
+    "genlayer-js": "2.0.0-rc.1",
+    "keytar": "^7.9.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

@@ -1,0 +1,3 @@
+# Keep the deployed contract source byte-identical on every checkout.
+# SHA-256 34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee
+contracts/CharterFlowCore.py text eol=lf

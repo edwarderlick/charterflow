@@ -1,0 +1,35 @@
+# Keystores, credentials and private keys
+*.keystore
+*_keystore.json
+keystore*.json
+*.pem
+*.key
+.env*
+!.env.example
+!**/.env.example
+spike/.env*
+spike/*_keystore*.json
+spike/keys/
+
+# Local historical evidence (signed rollup blobs, full receipts, operator checkpoint)
+scripts/pilot_evidence.json
+scripts/probe_results.json
+spike/payment_evidence.json
+scripts/.*.tmp.*
+scripts/.test_*evidence*.json
+
+# Design exports and local review captures (kept on disk, not first public commit)
+charterflow_*/
+frontend/review_screenshots/
+artifacts/
+
+# Dependencies & Build artifacts
+node_modules/
+dist/
+.system_generated/
+.tempmediaStorage/
+__pycache__/
+*.pyc
+.pytest_cache/
+.uv-cache-run/
+.DS_Store

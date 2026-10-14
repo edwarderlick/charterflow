@@ -1,0 +1,31 @@
+{
+  "deploy": {
+    "leaderTimeunitsAllocation": 100,
+    "validatorTimeunitsAllocation": 200,
+    "executionBudgetPerRound": "25000000000000000",
+    "executionConsumed": 0,
+    "totalMessageFees": 0,
+    "rotationsPerRound": 3,
+    "appealRounds": 0
+  },
+  "methods": {
+    "deposit": {
+      "leaderTimeunitsAllocation": 100,
+      "validatorTimeunitsAllocation": 200,
+      "executionBudgetPerRound": "25000000000000000",
+      "executionConsumed": 0,
+      "totalMessageFees": 0,
+      "rotationsPerRound": 3,
+      "appealRounds": 0
+    },
+    "payout": {
+      "leaderTimeunitsAllocation": 100,
+      "validatorTimeunitsAllocation": 200,
+      "executionBudgetPerRound": "25000000000000000",
+      "executionConsumed": 0,
+      "totalMessageFees": 0,
+      "rotationsPerRound": 3,
+      "appealRounds": 0
+    }
+  }
+}
