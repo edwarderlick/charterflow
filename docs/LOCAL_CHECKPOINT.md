@@ -16,3 +16,7 @@
 2. Do not invent a new JSON file with empty `stages` and then run write modes.
 3. Do not set `CHARTERFLOW_ALLOW_EVIDENCE_CREATE=1` unless you are deliberately creating a **new**, unrelated experiment. That switch must not be used to reset this funded pilot.
 4. Keep keytar / OS credential-manager keys off disk. Never place private keys in the checkpoint or in `.env`.
+
+## Locked recovery round
+
+`rnd-pilot-354517` (create_round tx `0x1476320746c0efda5f97d2db6256c571c6da7adff7c494af33031bf9adfb0bdc`) is immutable except for appended reconciliation/recovery observations. A future close/refund is a separate case after `round_end`. Nomination into that round is forbidden (`RECOVERY_ROUND_NOMINATION_FORBIDDEN` / `EXPIRED_NOMINATION_WINDOW`). A new funded lifecycle, when Studio Next `gen_call` reads work, must use a **new** unique round ID and a **separate** evidence file (`CHARTERFLOW_EVIDENCE_FILE`).

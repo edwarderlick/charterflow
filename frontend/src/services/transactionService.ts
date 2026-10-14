@@ -7,7 +7,7 @@ import {
   type Eip1193Provider,
 } from '@genlayer/transaction-kit';
 import { studioDevnet } from 'genlayer-js/chains';
-import { NETWORK_CONFIG, isContractConfigured } from '../config/network';
+import { NETWORK_CONFIG, isContractConfigured, VERIFIED_DEPLOYMENT } from '../config/network';
 import { GENLAYER_STUDIO_NEXT } from '../context/WalletContext';
 import { type DataAccessAdapter } from './dataAccess';
 import type { Proposal } from '../types';
@@ -503,6 +503,61 @@ export function serializeSubmitInput(input: SubmitInput): string {
   );
 }
 
+export const RECOVERY_ROUND_ID = VERIFIED_DEPLOYMENT.intendedRoundId;
+
+export function parseBlockTimestampSeconds(block: unknown): number {
+  const raw = (block as { timestamp?: string | number } | null)?.timestamp;
+  if (raw === undefined || raw === null || raw === '') {
+    throw new Error('NOMINATION_WINDOW_READ_FAILED: latest block timestamp missing');
+  }
+  const n = typeof raw === 'string' && raw.startsWith('0x') ? parseInt(raw, 16) : Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error('NOMINATION_WINDOW_READ_FAILED: latest block timestamp is not a unix time');
+  }
+  return n;
+}
+
+export function assertNominationWindowOpen(params: {
+  chainTimeSec: number | bigint | string;
+  nominationCutoffSec: number | bigint | string;
+  roundId: string;
+}): { chainTimeSec: string; nominationCutoffSec: string; roundId: string } {
+  const rid = String(params.roundId || '');
+  if (rid.toLowerCase() === RECOVERY_ROUND_ID.toLowerCase()) {
+    const err = new Error(
+      `RECOVERY_ROUND_NOMINATION_FORBIDDEN: ${RECOVERY_ROUND_ID} is a locked recovery/refund case. Nomination is forbidden.`
+    );
+    (err as Error & { code?: string }).code = 'RECOVERY_ROUND_NOMINATION_FORBIDDEN';
+    throw err;
+  }
+  const chainTime = BigInt(params.chainTimeSec);
+  const cutoff = BigInt(params.nominationCutoffSec);
+  if (chainTime >= cutoff) {
+    const err = new Error(
+      `EXPIRED_NOMINATION_WINDOW: chainTime=${chainTime} cutoff=${cutoff} round=${rid}`
+    );
+    (err as Error & { code?: string }).code = 'EXPIRED_NOMINATION_WINDOW';
+    throw err;
+  }
+  return {
+    chainTimeSec: chainTime.toString(),
+    nominationCutoffSec: cutoff.toString(),
+    roundId: rid,
+  };
+}
+
+async function readProviderChainTimeSeconds(provider: Eip1193Provider): Promise<number> {
+  let block: unknown;
+  try {
+    block = await provider.request({ method: 'eth_getBlockByNumber', params: ['latest', false] });
+  } catch (err: any) {
+    throw new Error(
+      `NOMINATION_WINDOW_READ_FAILED: eth_getBlockByNumber failed: ${err?.message || 'Provider error'}`
+    );
+  }
+  return parseBlockTimestampSeconds(block);
+}
+
 // ==============================================================================
 // Pre-Flight & Preparation
 // ==============================================================================
@@ -702,6 +757,38 @@ export async function prepareActionTransaction(
       if (!adapter) {
         throw new Error('DataAccessAdapter is required to capture pre-broadcast proposal snapshot for nomination attribution.');
       }
+
+      if (args.round_id.toLowerCase() === RECOVERY_ROUND_ID.toLowerCase()) {
+        throw new Error(
+          `RECOVERY_ROUND_NOMINATION_FORBIDDEN: ${RECOVERY_ROUND_ID} is a locked recovery/refund case. Nomination is forbidden.`
+        );
+      }
+
+      const chainTimeSec = await readProviderChainTimeSeconds(provider);
+      let liveRound;
+      try {
+        liveRound = await adapter.getRoundById(args.round_id);
+      } catch (err: any) {
+        throw new Error(
+          `NOMINATION_WINDOW_READ_FAILED: get_round(${args.round_id}) failed: ${err?.message || 'Read error'}. Submission blocked.`
+        );
+      }
+      if (!liveRound) {
+        throw new Error(
+          `NOMINATION_WINDOW_READ_FAILED: round "${args.round_id}" was not returned. Submission blocked.`
+        );
+      }
+      if (liveRound.nominationCutoffUnix === undefined || liveRound.nominationCutoffUnix === null) {
+        throw new Error(
+          `NOMINATION_WINDOW_READ_FAILED: round "${args.round_id}" is missing on-chain nomination_cutoff. Submission blocked.`
+        );
+      }
+      assertNominationWindowOpen({
+        chainTimeSec,
+        nominationCutoffSec: liveRound.nominationCutoffUnix,
+        roundId: args.round_id,
+      });
+
       if (!carriedRoundId) {
         throw new Error('Target round ID is required for proposal nomination.');
       }

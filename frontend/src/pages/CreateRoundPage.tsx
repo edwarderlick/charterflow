@@ -203,7 +203,7 @@ export const CreateRoundPage: React.FC = () => {
       ].join('\n\n');
 
       const now = Math.floor(Date.now() / 1000);
-      const nominationCutoff = now + Math.max(3600, Math.floor((durationDays * 86400) / 2));
+      const nominationCutoff = now + Math.max(86400, Math.floor((durationDays * 86400) / 2));
       const votingDuration = Math.max(3600, Math.min(1209600, votingDays * 86400));
       const roundEnd = nominationCutoff + 86400 + votingDuration + 7200;
 

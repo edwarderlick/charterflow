@@ -37,7 +37,10 @@ const {
   planDurableStageResume,
   runStage2ReadOnlyReconciliation,
   diagnoseStage2StudioReads,
+  assertNominationWindowOpen,
+  assertNominationWindowOpenOnChain,
   TransactionHashVariant,
+  EXPECTED_ROUND_ID,
 } = require('./run_charterflow_pilot');
 
 async function runTests() {
@@ -2933,6 +2936,87 @@ async function runTests() {
       assert(e.message.includes('INCONCLUSIVE_PAGINATION'));
     }
     assert(badCountHalted, 'Negative proposals count must halt as INCONCLUSIVE_PAGINATION');
+  });
+
+  await test('Nomination cutoff guard: expired window is EXPIRED_NOMINATION_WINDOW with zero writes', async () => {
+    let threw = false;
+    try {
+      assertNominationWindowOpen({
+        chainTimeSec: 1_800_000_000,
+        nominationCutoffSec: 1_700_000_000,
+        roundId: 'rnd-fresh-open',
+      });
+    } catch (err) {
+      threw = true;
+      assert(err.code === 'EXPIRED_NOMINATION_WINDOW' || String(err.message).includes('EXPIRED_NOMINATION_WINDOW'));
+    }
+    assert(threw, 'expired cutoff must throw');
+
+    const open = assertNominationWindowOpen({
+      chainTimeSec: 1_700_000_000,
+      nominationCutoffSec: 1_800_000_000,
+      roundId: 'rnd-fresh-open',
+    });
+    assert(open.roundId === 'rnd-fresh-open');
+
+    let recoveryThrew = false;
+    try {
+      assertNominationWindowOpen({
+        chainTimeSec: 1,
+        nominationCutoffSec: 9_999_999_999,
+        roundId: EXPECTED_ROUND_ID,
+      });
+    } catch (err) {
+      recoveryThrew = true;
+      assert(String(err.message).includes('RECOVERY_ROUND_NOMINATION_FORBIDDEN'));
+    }
+    assert(recoveryThrew, 'recovery round must be forbidden even with a future cutoff');
+
+    let writes = 0;
+    const mockClient = {
+      getBlock: async () => ({ timestamp: 1_800_000_000 }),
+      readContract: async ({ functionName }) => {
+        if (functionName === 'get_round') {
+          return { nomination_cutoff: 1_700_000_000, round_id: 'rnd-fresh-open' };
+        }
+        throw new Error(`unexpected ${functionName}`);
+      },
+      writeContract: async () => {
+        writes += 1;
+        throw new Error('write must not run');
+      },
+    };
+    let onChainThrew = false;
+    try {
+      await assertNominationWindowOpenOnChain(mockClient, '0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21', 'rnd-fresh-open');
+    } catch (err) {
+      onChainThrew = true;
+      assert(String(err.message).includes('EXPIRED_NOMINATION_WINDOW'));
+    }
+    assert(onChainThrew);
+    assert(writes === 0, 'expired on-chain cutoff must not call writeContract');
+
+    let readFailThrew = false;
+    try {
+      await assertNominationWindowOpenOnChain(
+        {
+          getBlock: async () => ({ timestamp: 1_800_000_000 }),
+          readContract: async () => {
+            throw new Error("Can't reconnect until invalid transaction is rolled back");
+          },
+          writeContract: async () => {
+            writes += 1;
+          },
+        },
+        '0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21',
+        'rnd-fresh-open'
+      );
+    } catch (err) {
+      readFailThrew = true;
+      assert(String(err.message).includes('NOMINATION_WINDOW_READ_FAILED'));
+    }
+    assert(readFailThrew);
+    assert(writes === 0, 'failed get_round must not write');
   });
 
   console.log(`\n================================================================`);

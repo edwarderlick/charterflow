@@ -17,8 +17,8 @@
 
 | Item | Status | Value |
 |---|---|---|
-| Git repository URL | **MISSING** | No remote. A local initial commit may exist after this packaging pass; it has not been pushed. |
-| Hosted frontend URL | **MISSING** | Local Vite only. Static-host plan: `docs/FRONTEND_STATIC_HOSTING.md`. Not deployed. |
+| Git repository URL | **MISSING** | No remote. Local commits on `master` only; nothing has been pushed. |
+| Hosted frontend URL | **MISSING** | Local Vite `http://localhost:5173/`. Static-host plan: `docs/FRONTEND_STATIC_HOSTING.md`. Not deployed. |
 | Contract address / txs | **VERIFIED** (on-chain facts we recorded) | See `docs/PUBLIC_EVIDENCE.md`. |
 | Explorer HTML page | **UNVERIFIED** | Configured base `https://explorer-studio-dev.genlayer.com/`. Page contents were not confirmed this pass. |
 | Demo evidence URL | **MISSING** | Local smoke notes exist; no public demo URL. |

@@ -172,7 +172,7 @@ export const ExploreRoundsPage: React.FC = () => {
                     : 'bg-[#201f1f] text-[#c8c6c2] hover:text-white'
                 }`}
               >
-                All Rounds ({rounds.length})
+                All Rounds ({loading || error ? '--' : rounds.length})
               </button>
               <button
                 type="button"
@@ -183,7 +183,7 @@ export const ExploreRoundsPage: React.FC = () => {
                     : 'bg-[#201f1f] text-[#c8c6c2] hover:text-white'
                 }`}
               >
-                Active / Voting Open ({rounds.filter((r) => r.status === 'ACTIVE_VOTING').length})
+                Active / Voting Open ({loading || error ? '--' : rounds.filter((r) => r.status === 'ACTIVE_VOTING').length})
               </button>
               <button
                 type="button"
@@ -194,7 +194,7 @@ export const ExploreRoundsPage: React.FC = () => {
                     : 'bg-[#201f1f] text-[#c8c6c2] hover:text-white'
                 }`}
               >
-                Finalized / Closed ({rounds.filter((r) => r.status === 'FINALIZED').length})
+                Finalized / Closed ({loading || error ? '--' : rounds.filter((r) => r.status === 'FINALIZED').length})
               </button>
               <button
                 type="button"
@@ -205,7 +205,7 @@ export const ExploreRoundsPage: React.FC = () => {
                     : 'bg-[#201f1f] text-[#c8c6c2] hover:text-white'
                 }`}
               >
-                Compliance Stage ({rounds.filter((r) => r.status === 'COMPLIANCE').length})
+                Compliance Stage ({loading || error ? '--' : rounds.filter((r) => r.status === 'COMPLIANCE').length})
               </button>
             </div>
 

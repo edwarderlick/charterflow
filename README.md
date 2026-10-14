@@ -8,7 +8,7 @@ This repository is **not** an end-to-end working on-chain pilot. Stage 2 readbac
 
 - **Contract source:** `contracts/CharterFlowCore.py` SHA-256 `34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee` (must stay byte-identical with the deployed source).
 - **Deployed contract:** `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21` (tx `0xc5c220571c8d890c04715ce65cfd23ae92a0d49e696c596979591f771ab734e4`).
-- **Finalized `create_round`:** `0x1476320746c0efda5f97d2db6256c571c6da7adff7c494af33031bf9adfb0bdc` is `FINALIZED` / `FINISHED_WITH_RETURN` with value `1e18` wei. Intended round `rnd-pilot-354517` and its 1 GEN genesis ledger are **unverified**.
+- **Finalized `create_round`:** `0x1476320746c0efda5f97d2db6256c571c6da7adff7c494af33031bf9adfb0bdc` is `FINALIZED` / `FINISHED_WITH_RETURN` with value `1e18` wei. Intended round `rnd-pilot-354517` and its 1 GEN genesis ledger are **unverified**. That round is a locked recovery/refund case; do not nominate into it.
 - **Studio Next `gen_call`:** contract views fail JSON-RPC `-32603` rollback on both CharterFlow and an independently confirmed PaymentSpike control. `eth_*` reads succeed.
 - **No Stage 3+ writes** have been sent. Do not redeploy, resend `create_round`, or fund accounts from a public checkout.
 - **Builder Portal:** not submitted. `docs/PORTAL_SUBMISSION_CHECKLIST.md`.
@@ -57,6 +57,8 @@ Frontend defaults (overridable with `VITE_*`):
 cd frontend
 npm run dev
 ```
+
+Local app: `http://localhost:5173/` — checklist: `docs/LOCAL_WALKTHROUGH.md`. Live mode currently shows Studio Next `gen_call` `-32603` errors. Do not treat design-preview fixtures as chain evidence.
 
 Static-host plan (not deployed): `docs/FRONTEND_STATIC_HOSTING.md`. Live mode must show RPC errors honestly; design preview stays explicitly labeled.
 

@@ -20,3 +20,5 @@
 - Replaced simulated live-mode activity cards with deployment, Stage 2 readback, and safety-gate status cards.
 
 The smoke test proves truthful rendering of the present error and preview isolation. It does not prove a successful live read, wallet connection, or write workflow.
+
+A later live Vite walkthrough on `http://127.0.0.1:5173/` (2026-10-14) confirmed the same honest `-32603` surfaces. Nominate previously stayed on `RETRIEVING ROUND TELEMETRY` after a rejected `getRoundById`; that page now shows `[READ ERROR]`. Explore tab counts show `--` during failed reads. Details: `docs/LOCAL_WALKTHROUGH.md`.

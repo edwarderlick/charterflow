@@ -105,6 +105,8 @@ export interface Round {
   withdrawnGen: number;
   capPerProposalGen: number;
   deadlineDisplay: string;
+  nominationCutoffUnix?: number;
+  roundEndUnix?: number;
   consensusThresholdPercent: number;
   requiredVotes: number;
   totalVoters: number;

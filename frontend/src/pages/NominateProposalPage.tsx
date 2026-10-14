@@ -12,12 +12,13 @@ import type { Round, ProposalDraft } from '../types';
 export const NominateProposalPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { adapter, isDesignPreview, refreshData } = useData();
+  const { adapter, isDesignPreview, refreshData, refreshKey } = useData();
   const { account, chainId, isConnected, connectWallet } = useWallet();
 
   const roundId = id || '';
   const [round, setRound] = useState<Round | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Form Fields - clean default values without fabricated data
   const [recipientAddress, setRecipientAddress] = useState('');
@@ -43,20 +44,29 @@ export const NominateProposalPage: React.FC = () => {
     let mounted = true;
     if (!roundId) {
       setLoading(false);
+      setError(null);
       return;
     }
 
-    adapter.getRoundById(roundId).then((r) => {
-      if (mounted) {
+    setLoading(true);
+    setError(null);
+    adapter
+      .getRoundById(roundId)
+      .then((r) => {
+        if (!mounted) return;
         setRound(r || null);
         if (r && r.charterRules.length > 0 && !selectedDirective) {
           setSelectedDirective(r.charterRules[0].id);
         }
         setLoading(false);
-      }
-    });
+      })
+      .catch((err: { message?: string }) => {
+        if (!mounted) return;
+        setRound(null);
+        setError(err?.message || 'Failed to query round from contract');
+        setLoading(false);
+      });
 
-    // Check saved draft
     const draft = adapter.getProposalDraft(roundId);
     if (draft && mounted) {
       setSavedDraft(draft);
@@ -65,7 +75,7 @@ export const NominateProposalPage: React.FC = () => {
     return () => {
       mounted = false;
     };
-  }, [roundId, adapter]);
+  }, [roundId, adapter, refreshKey]);
 
   const handleRestoreDraft = () => {
     if (!savedDraft) return;
@@ -90,6 +100,41 @@ export const NominateProposalPage: React.FC = () => {
     return (
       <div className="flex-1 flex items-center justify-center p-20 font-mono text-xs text-[#888884] bg-[#131313]">
         RETRIEVING ROUND TELEMETRY ON CHAIN 61997...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-20 space-y-4 bg-[#131313] text-center font-mono">
+        <div className="p-4 bg-[#201f1f] border border-[#ff3344]/30">
+          <span className="material-symbols-outlined text-4xl text-[#ff3344]">warning</span>
+        </div>
+        <div className="text-sm text-[#ff3344] uppercase font-bold">
+          [READ ERROR] FAILED TO QUERY ROUND FROM ON-CHAIN RUNTIME
+        </div>
+        <p className="font-['Hanken_Grotesk'] text-sm text-[#c8c6c2] max-w-md">
+          An RPC timeout, network failure, or schema validation error occurred while querying GenLayer Studio Next. The failure was not masked as a 404.
+        </p>
+        <div className="p-3 bg-[#0e0e0e] border border-[#2a2a2a] text-xs text-[#ffb596] max-w-lg break-all font-mono text-left">
+          DIAGNOSTIC: {error}
+        </div>
+        <div className="flex gap-4 pt-2">
+          <button
+            type="button"
+            onClick={refreshData}
+            className="px-6 py-2.5 bg-[#ff5719] text-[#521300] text-xs uppercase font-bold hover:bg-white hover:text-black transition-colors flex items-center gap-2"
+          >
+            <span>RETRY ON-CHAIN QUERY</span>
+            <span>↻</span>
+          </button>
+          <Link
+            to="/rounds"
+            className="px-5 py-2.5 bg-[#201f1f] text-[#c8c6c2] text-xs uppercase hover:text-white border border-[#2a2a2a]"
+          >
+            RETURN TO ROUNDS ↗
+          </Link>
+        </div>
       </div>
     );
   }

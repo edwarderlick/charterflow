@@ -569,6 +569,109 @@ function verifyStage2GenesisReadback({ tx, stage, round, roundIdsCount, roundIds
   };
 }
 
+function toUnixSeconds(value, label) {
+  if (value === undefined || value === null || value === '') {
+    throw new Error(`NOMINATION_WINDOW_READ_FAILED: ${label} is missing`);
+  }
+  const n = typeof value === 'string' && value.startsWith('0x') ? BigInt(value) : BigInt(value);
+  if (n < 0n) throw new Error(`NOMINATION_WINDOW_READ_FAILED: ${label} is negative`);
+  return n;
+}
+
+/**
+ * Pre-broadcast nomination guard. Zero writes. Uses chain time vs on-chain cutoff.
+ * rnd-pilot-354517 is a locked recovery/refund case and must never receive a nomination.
+ */
+function assertNominationWindowOpen({ chainTimeSec, nominationCutoffSec, roundId }) {
+  const rid = String(roundId || '');
+  if (rid.toLowerCase() === EXPECTED_ROUND_ID.toLowerCase()) {
+    const err = new Error(
+      `RECOVERY_ROUND_NOMINATION_FORBIDDEN: ${EXPECTED_ROUND_ID} is a locked recovery/refund case. Nomination is forbidden.`
+    );
+    err.code = 'RECOVERY_ROUND_NOMINATION_FORBIDDEN';
+    throw err;
+  }
+  const chainTime = toUnixSeconds(chainTimeSec, 'chainTimeSec');
+  const cutoff = toUnixSeconds(nominationCutoffSec, 'nominationCutoffSec');
+  if (chainTime >= cutoff) {
+    const err = new Error(
+      `EXPIRED_NOMINATION_WINDOW: chainTime=${chainTime} cutoff=${cutoff} round=${rid}`
+    );
+    err.code = 'EXPIRED_NOMINATION_WINDOW';
+    throw err;
+  }
+  return {
+    chainTimeSec: chainTime.toString(),
+    nominationCutoffSec: cutoff.toString(),
+    roundId: rid,
+  };
+}
+
+async function readLatestChainTimeSeconds(client) {
+  let block;
+  if (client && typeof client.getBlock === 'function') {
+    block = await client.getBlock({ blockTag: 'latest' });
+  } else if (client && typeof client.request === 'function') {
+    block = await client.request({ method: 'eth_getBlockByNumber', params: ['latest', false] });
+  } else {
+    const res = await fetch(EXPECTED_RPC_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_getBlockByNumber',
+        params: ['latest', false],
+      }),
+    });
+    const body = await res.json();
+    if (body.error) {
+      throw new Error(body.error.message || JSON.stringify(body.error));
+    }
+    block = body.result;
+  }
+  const ts = block?.timestamp ?? block?.result?.timestamp;
+  return toUnixSeconds(ts, 'latest block timestamp');
+}
+
+async function assertNominationWindowOpenOnChain(client, contractAddress, roundId) {
+  if (String(roundId || '').toLowerCase() === EXPECTED_ROUND_ID.toLowerCase()) {
+    const err = new Error(
+      `RECOVERY_ROUND_NOMINATION_FORBIDDEN: ${EXPECTED_ROUND_ID} is a locked recovery/refund case. Nomination is forbidden.`
+    );
+    err.code = 'RECOVERY_ROUND_NOMINATION_FORBIDDEN';
+    throw err;
+  }
+  let chainTimeSec;
+  try {
+    chainTimeSec = await readLatestChainTimeSeconds(client);
+  } catch (err) {
+    throw new Error(
+      `NOMINATION_WINDOW_READ_FAILED: chain time unavailable: ${sanitizeErrorText(err?.message || String(err))}`
+    );
+  }
+  let round;
+  try {
+    round = await client.readContract({
+      address: contractAddress,
+      functionName: 'get_round',
+      args: [roundId],
+    });
+  } catch (err) {
+    throw new Error(
+      `NOMINATION_WINDOW_READ_FAILED: get_round(${roundId}) failed: ${sanitizeErrorText(err?.message || String(err))}`
+    );
+  }
+  if (!round || round.nomination_cutoff === undefined || round.nomination_cutoff === null) {
+    throw new Error(`NOMINATION_WINDOW_READ_FAILED: get_round(${roundId}) missing nomination_cutoff`);
+  }
+  return assertNominationWindowOpen({
+    chainTimeSec,
+    nominationCutoffSec: round.nomination_cutoff,
+    roundId,
+  });
+}
+
 function sanitizeRpcEvidence(value) {
   const blockedKeys = /private.?key|mnemonic|password|secret|keystore/i;
   const visit = (item) => {
@@ -4169,6 +4272,19 @@ async function main() {
     }
   } else {
     // When there is no saved nomination txHash, never adopt an existing proposal merely because content matches.
+    try {
+      const windowCheck = await assertNominationWindowOpenOnChain(creatorClient, contractAddress, roundId);
+      evidence.stages.nominate.nominationWindowCheck = {
+        ...windowCheck,
+        checkedAt: new Date().toISOString(),
+      };
+      saveEvidence(evidence);
+    } catch (err) {
+      recordFailure(evidence, 'nominateWindow', err, null);
+      process.exitCode = 1;
+      return;
+    }
+
     // Persist pre-broadcast snapshot FIRST before broadcasting.
     const nominateArgs = [
       roundId,
@@ -4766,6 +4882,9 @@ module.exports = {
   requireExplicitMessageFee,
   isDefinitiveContractReadNotFound,
   verifyStage2GenesisReadback,
+  assertNominationWindowOpen,
+  readLatestChainTimeSeconds,
+  assertNominationWindowOpenOnChain,
   runStage2ReadOnlyReconciliation,
   diagnoseStage2StudioReads,
   TransactionHashVariant,

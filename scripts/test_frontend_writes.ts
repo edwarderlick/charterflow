@@ -75,6 +75,8 @@ let mockStorageFailOnAddTxId = false;
 
 import {
   prepareActionTransaction,
+  assertNominationWindowOpen,
+  RECOVERY_ROUND_ID,
   executeAndTrackTransaction,
   resumeInFlightTracking,
   verifyIntendedStateAfterSuccess,
@@ -134,6 +136,8 @@ async function assertThrows(fn: () => Promise<any>, expectedSubstr: string, msg:
 class MockEip1193Provider {
   public account: string = '0x1111111111111111111111111111111111111111';
   public chainIdHex: string = '0xf22d'; // 61997 in hex
+  public blockTimestampSec: number = Math.floor(Date.now() / 1000);
+  public failBlockRead = false;
 
   async request(args: { method: string; params?: any[] }): Promise<any> {
     if (args.method === 'eth_accounts' || args.method === 'eth_requestAccounts') {
@@ -141,6 +145,12 @@ class MockEip1193Provider {
     }
     if (args.method === 'eth_chainId') {
       return this.chainIdHex;
+    }
+    if (args.method === 'eth_getBlockByNumber') {
+      if (this.failBlockRead) {
+        throw new Error('block read failed');
+      }
+      return { timestamp: `0x${this.blockTimestampSec.toString(16)}`, number: '0x1' };
     }
     return '0x';
   }
@@ -255,14 +265,48 @@ function buildMockKit(opts: MockKitOptions = {}): TransactionKit {
   };
 }
 
+function openNominationRound(id: string): Round {
+  return {
+    id,
+    title: 'Test Round',
+    summary: 'Test summary',
+    creatorAddress: '0x1111111111111111111111111111111111111111',
+    status: 'ACTIVE',
+    totalPoolGen: 2,
+    availableGen: 2,
+    reservedGen: 0,
+    approvedGen: 0,
+    withdrawnGen: 0,
+    capPerProposalGen: 1,
+    deadlineDisplay: 'TBD',
+    nominationCutoffUnix: Math.floor(Date.now() / 1000) + 86400,
+    roundEndUnix: Math.floor(Date.now() / 1000) + 86400 * 3,
+    consensusThresholdPercent: 66.7,
+    requiredVotes: 2,
+    totalVoters: 2,
+    currentYesVotes: 0,
+    proposalsCount: { inReview: 0, decided: 0, total: 0 },
+    charterRules: [],
+    charterExclusions: [],
+    committeeMembers: [],
+    eventStream: [],
+    createdAt: new Date().toISOString(),
+  };
+}
+
 class MockDataAccessAdapter implements Partial<DataAccessAdapter> {
   rounds: Record<string, Round> = {};
   proposals: Record<string, Proposal> = {};
   failGetProposalsByRound?: Error;
+  failGetRoundById?: Error;
   malformedProposalsByRound?: any;
+  defaultOpenNomination = true;
 
   async getRoundById(id: string): Promise<Round | null> {
-    return this.rounds[id] || null;
+    if (this.failGetRoundById) throw this.failGetRoundById;
+    if (this.rounds[id]) return this.rounds[id];
+    if (this.defaultOpenNomination) return openNominationRound(id);
+    return null;
   }
 
   async getProposalById(id: string): Promise<Proposal | null> {
@@ -1019,6 +1063,7 @@ async function runWriteTests() {
   {
     setTransactionKitFactoryForTesting(() => buildMockKit());
     const mockAdapter = new MockDataAccessAdapter();
+    mockAdapter.defaultOpenNomination = false;
 
     // Transaction succeeds on chain, but record is NOT found in contract storage (readback unverified)
     const unverifiedCheck = await verifyIntendedStateAfterSuccess(
@@ -1791,6 +1836,112 @@ async function runWriteTests() {
       callerAddress
     );
     assert(votePass.verified === true, 'cast_vote verifies voter recorded in voter log');
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST SUITE 12: Pre-broadcast nomination cutoff (zero writes)
+  // --------------------------------------------------------------------------
+  console.log('\n--- Test Suite 12: Expired nomination window blocks before estimate/submit ---');
+  {
+    let submitCount = 0;
+    setTransactionKitFactoryForTesting(() => {
+      const kit = buildMockKit();
+      const originalSubmit = kit.submit;
+      kit.submit = async (quote: any, tx: any) => {
+        submitCount++;
+        return originalSubmit(quote, tx);
+      };
+      return kit;
+    });
+
+    const windowProvider = new MockEip1193Provider();
+    windowProvider.blockTimestampSec = 1_800_000_000;
+    const expiredAdapter = new MockDataAccessAdapter();
+    expiredAdapter.defaultOpenNomination = false;
+    expiredAdapter.rounds['round-expired'] = {
+      ...openNominationRound('round-expired'),
+      nominationCutoffUnix: 1_700_000_000,
+    };
+
+    await assertThrows(
+      async () =>
+        prepareActionTransaction({
+          action: 'nominate_proposal',
+          provider: windowProvider,
+          account: callerAddress,
+          chainId: 61997,
+          contractAddress,
+          adapter: expiredAdapter as any,
+          roundId: 'round-expired',
+          nominateProposalArgs: {
+            round_id: 'round-expired',
+            recipient: otherAddress,
+            title: 'Too late',
+            requested_amount_wei: 1000000000000000000n,
+            deliverables_text: 'Deliverables specification text with sufficient characters',
+          },
+        }),
+      'EXPIRED_NOMINATION_WINDOW',
+      'Expired on-chain cutoff yields EXPIRED_NOMINATION_WINDOW'
+    );
+    assert(submitCount === 0, 'Expired cutoff makes zero kit.submit writes');
+
+    await assertThrows(
+      async () =>
+        prepareActionTransaction({
+          action: 'nominate_proposal',
+          provider: windowProvider,
+          account: callerAddress,
+          chainId: 61997,
+          contractAddress,
+          adapter: new MockDataAccessAdapter() as any,
+          roundId: RECOVERY_ROUND_ID,
+          nominateProposalArgs: {
+            round_id: RECOVERY_ROUND_ID,
+            recipient: otherAddress,
+            title: 'Recovery round',
+            requested_amount_wei: 1000000000000000000n,
+            deliverables_text: 'Deliverables specification text with sufficient characters',
+          },
+        }),
+      'RECOVERY_ROUND_NOMINATION_FORBIDDEN',
+      'Locked recovery round rnd-pilot-354517 cannot be nominated into'
+    );
+    assert(submitCount === 0, 'Recovery-round block makes zero kit.submit writes');
+
+    const openAdapter = new MockDataAccessAdapter();
+    const openProvider = new MockEip1193Provider();
+    const openPrep = await prepareActionTransaction({
+      action: 'nominate_proposal',
+      provider: openProvider,
+      account: callerAddress,
+      chainId: 61997,
+      contractAddress,
+      adapter: openAdapter as any,
+      roundId: 'round-open-window',
+      nominateProposalArgs: {
+        round_id: 'round-open-window',
+        recipient: otherAddress,
+        title: 'Open window',
+        requested_amount_wei: 1000000000000000000n,
+        deliverables_text: 'Deliverables specification text with sufficient characters',
+      },
+    });
+    assert(openPrep.action === 'nominate_proposal', 'Open nomination window still prepares a quote');
+
+    const pureExpired = (() => {
+      try {
+        assertNominationWindowOpen({
+          chainTimeSec: 200,
+          nominationCutoffSec: 100,
+          roundId: 'round-x',
+        });
+        return false;
+      } catch (err: any) {
+        return String(err.message).includes('EXPIRED_NOMINATION_WINDOW');
+      }
+    })();
+    assert(pureExpired, 'Pure cutoff helper reports EXPIRED_NOMINATION_WINDOW');
   }
 
   // Reset kit factory

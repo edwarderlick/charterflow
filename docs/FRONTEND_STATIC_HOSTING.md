@@ -28,9 +28,14 @@ Output: `frontend/dist/` (gitignored).
 The app uses `BrowserRouter` with routes such as `/rounds/:id` and `/proposals/:id`. The static host must serve `index.html` for unknown paths.
 
 - Netlify: `frontend/public/_redirects` contains `/*    /index.html   200` and is copied into `dist/`.
-- Vercel: `rewrites` `[{ "source": "/(.*)", "destination": "/index.html" }]`.
+- Vercel: `frontend/vercel.json` rewrites `/(.*)` to `/index.html`. Set the Vercel **Root Directory** to `frontend`. Public env (optional; defaults already match Studio Next):
+  - `VITE_RPC_URL=https://studio-next.genlayer.com/api`
+  - `VITE_EXPLORER_URL=https://explorer-studio-dev.genlayer.com`
+  - `VITE_CONTRACT_ADDRESS=0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`
 - Cloudflare Pages / nginx: equivalent SPA fallback to `index.html`.
 - GitHub Pages project sites also need Vite `base` set to the repo subpath.
+
+Do not deploy until a local live walkthrough has been accepted.
 
 ## Honest live errors and preview isolation
 

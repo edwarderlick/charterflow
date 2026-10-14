@@ -439,6 +439,7 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
     const requiredVotes = totalVoters > 0 ? Math.floor((totalVoters * 2 + 2) / 3) : 0;
 
     const roundEndTs = Number(rData.round_end) || 0;
+    const nominationCutoffUnix = Number(rData.nomination_cutoff);
     const deadlineDisplay = roundEndTs > 0
       ? new Date(roundEndTs * 1000).toLocaleDateString('en-US', {
           month: 'short',
@@ -461,6 +462,8 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
       withdrawnGen: payoutsEmittedGen,
       capPerProposalGen: capGen,
       deadlineDisplay,
+      nominationCutoffUnix: Number.isFinite(nominationCutoffUnix) ? nominationCutoffUnix : undefined,
+      roundEndUnix: roundEndTs > 0 ? roundEndTs : undefined,
       consensusThresholdPercent: 66.67,
       requiredVotes,
       totalVoters,

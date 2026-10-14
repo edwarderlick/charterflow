@@ -15,9 +15,9 @@
 
 ## Not yet proven
 
-- `rnd-pilot-354517` has not passed complete `get_round`, registry, genesis-ledger, and contract-balance reconciliation. A receipt alone is insufficient. Exact `verifyStage2GenesisReadback` has not been applied on successful real-chain views.
+- `rnd-pilot-354517` has not passed complete `get_round`, registry, genesis-ledger, and contract-balance reconciliation. A receipt alone is insufficient. Exact `verifyStage2GenesisReadback` has not been applied on successful real-chain views. Latest bounded diagnostic: `2026-10-14T08:10:22.504Z`, verdict **INCONCLUSIVE**, failure class `all_contract_views`, write calls `0`. That round is a locked recovery/refund case.
 - No nomination, AI charter verdict, vote, approval, unauthorized-withdraw rejection, authorized withdrawal, payout emission, recipient delivery, duplicate-withdraw rejection, round closure, or creator refund has been proven for this deployment.
-- The live browser workflow has not been proven end to end. Design-preview fixtures are not chain evidence.
+- Local Vite live-mode walkthrough at `http://127.0.0.1:5173/` shows honest `-32603` read errors. Wallet writes and a funded lifecycle were not exercised. Design-preview fixtures are not chain evidence. Checklist: `docs/LOCAL_WALKTHROUGH.md`.
 - Public GitHub URL, hosted frontend URL, and portal submission are absent.
 
 ## Required before a portal-ready claim
