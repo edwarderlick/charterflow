@@ -8,6 +8,7 @@ import {
   type PreparedTransaction,
 } from '../services/transactionService';
 import { TransactionModal } from '../components/TransactionModal';
+import { canCreateRound } from '../services/permissions';
 import type { RoundDraft } from '../types';
 
 
@@ -62,7 +63,7 @@ export const CreateRoundPage: React.FC = () => {
   const [ratified, setRatified] = useState<boolean>(false);
 
   // Preview Modal & Wallet Transaction State
-  const { account, chainId, isConnected, connectWallet } = useWallet();
+  const { account, chainId, isConnected, connectWallet, provider, isCorrectNetwork, balanceGen } = useWallet();
   const [showPreviewModal, setShowPreviewModal] = useState<boolean>(false);
   const [preparedTx, setPreparedTx] = useState<PreparedTransaction | null>(null);
   const [showTxModal, setShowTxModal] = useState<boolean>(false);
@@ -172,8 +173,18 @@ export const CreateRoundPage: React.FC = () => {
     }
     setIsPreparingTx(true);
     setTxError(null);
-    if (!chainId || chainId !== 61997) {
-      setTxError('Wallet network unverified. Connect an EIP-1193 wallet on GenLayer Studio Next (Chain ID 61997).');
+    if (!provider) {
+      setTxError('No injected EIP-1193 provider selected.');
+      setIsPreparingTx(false);
+      return;
+    }
+    if (!chainId || chainId !== 61997 || !isCorrectNetwork) {
+      setTxError('Wallet network unverified. Switch to GenLayer Studio Next (Chain ID 61997) with an explicit click. The app will not auto-switch.');
+      setIsPreparingTx(false);
+      return;
+    }
+    if (balanceGen === '0.00') {
+      setTxError('This wallet has 0 GEN. The contract requires a 1 GEN minimum deposit plus network fees.');
       setIsPreparingTx(false);
       return;
     }
@@ -209,7 +220,7 @@ export const CreateRoundPage: React.FC = () => {
 
       const prepared = await prepareActionTransaction({
         action: 'create_round',
-        provider: (window as any).ethereum,
+        provider,
         account,
         chainId,
         adapter,
@@ -961,10 +972,11 @@ export const CreateRoundPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                disabled={!canPreview || isPreparingTx}
+                disabled={!canPreview || isPreparingTx || (!isDesignPreview && !canCreateRound({ connected: isConnected, correctChain: isCorrectNetwork, balanceGen }).allowed)}
                 onClick={handleInitiateDeploy}
+                title={canCreateRound({ connected: isConnected, correctChain: isCorrectNetwork, balanceGen }).reason}
                 className={`w-full py-3 font-mono text-xs uppercase font-bold tracking-wider flex items-center justify-center gap-2 transition-colors ${
-                  canPreview && !isPreparingTx
+                  canPreview && !isPreparingTx && (isDesignPreview || canCreateRound({ connected: isConnected, correctChain: isCorrectNetwork, balanceGen }).allowed)
                     ? 'bg-[#ff5719] text-[#521300] hover:bg-white hover:text-black cursor-pointer'
                     : 'bg-[#2a2a2a] text-[#888884] cursor-not-allowed'
                 }`}
@@ -972,6 +984,9 @@ export const CreateRoundPage: React.FC = () => {
                 <span>{isPreparingTx ? 'ESTIMATING & PREPARING...' : isDesignPreview ? 'SIMULATE GENESIS' : 'DEPLOY & FREEZE'}</span>
                 <span>↗</span>
               </button>
+              <p className="font-mono text-[10px] text-[#888884]">
+                {canCreateRound({ connected: isConnected, correctChain: isCorrectNetwork, balanceGen }).reason}
+              </p>
               {txError && (
                 <div className="p-2 bg-[#ff3344]/10 border border-[#ff3344] text-[#ff3344] text-[10px] text-center">
                   {txError}
@@ -1070,7 +1085,7 @@ export const CreateRoundPage: React.FC = () => {
         isOpen={showTxModal}
         onClose={() => setShowTxModal(false)}
         prepared={preparedTx}
-        provider={(window as any).ethereum}
+        provider={provider}
         account={account || ''}
         adapter={adapter}
         onSuccess={(tx) => {

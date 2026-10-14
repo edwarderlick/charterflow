@@ -1,4 +1,15 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  classifyWalletError,
+  collectInjectedProviders,
+  formatWalletBalanceLabel,
+  readWalletSession,
+  selectWalletByRdns,
+  shouldAdoptAuthorizedAccounts,
+  writeWalletSession,
+  type DiscoveredWallet,
+  type Eip1193Provider,
+} from '../services/eip1193';
 
 export const GENLAYER_STUDIO_NEXT = {
   chainId: 61997,
@@ -20,10 +31,17 @@ interface WalletContextType {
   isCorrectNetwork: boolean;
   isConnecting: boolean;
   balanceGen: string | null;
+  balanceReadFailed: boolean;
   error: string | null;
-  connectWallet: () => Promise<void>;
+  wallets: DiscoveredWallet[];
+  selectedWallet: DiscoveredWallet | null;
+  provider: Eip1193Provider | null;
+  walletInstalled: boolean;
+  needsWalletChoice: boolean;
+  connectWallet: (rdns?: string) => Promise<void>;
   disconnectWallet: () => void;
   switchToStudioNext: () => Promise<void>;
+  balanceLabel: string;
 }
 
 const WalletContext = createContext<WalletContextType>({
@@ -33,158 +51,240 @@ const WalletContext = createContext<WalletContextType>({
   isCorrectNetwork: false,
   isConnecting: false,
   balanceGen: null,
+  balanceReadFailed: false,
   error: null,
+  wallets: [],
+  selectedWallet: null,
+  provider: null,
+  walletInstalled: false,
+  needsWalletChoice: false,
   connectWallet: async () => {},
   disconnectWallet: () => {},
   switchToStudioNext: async () => {},
+  balanceLabel: 'NO WALLET',
 });
+
+function getLocalStorage(): Storage | null {
+  try {
+    return typeof window !== 'undefined' ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [account, setAccount] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
   const [balanceGen, setBalanceGen] = useState<string | null>(null);
+  const [balanceReadFailed, setBalanceReadFailed] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [wallets, setWallets] = useState<DiscoveredWallet[]>([]);
+  const [selectedRdns, setSelectedRdns] = useState<string | undefined>(
+    () => readWalletSession(getLocalStorage())?.rdns
+  );
+  const eip6963 = useRef<DiscoveredWallet[]>([]);
+  const accountRef = useRef<string | null>(null);
+  accountRef.current = account;
 
-  const ethereum = typeof window !== 'undefined' ? (window as any).ethereum : undefined;
+  const refreshDiscovery = useCallback(() => {
+    const win = typeof window === 'undefined' ? null : (window as Window & { ethereum?: Eip1193Provider });
+    const discovered = collectInjectedProviders({
+      ethereum: win?.ethereum,
+      discovered: eip6963.current,
+    });
+    setWallets(discovered);
+    return discovered;
+  }, []);
 
-  const updateBalance = async (userAddress: string) => {
-    if (!ethereum) return;
+  const selectedWallet = useMemo(
+    () => selectWalletByRdns(wallets, selectedRdns),
+    [wallets, selectedRdns]
+  );
+  const provider = selectedWallet?.provider || null;
+
+  const updateBalance = useCallback(async (userAddress: string, activeProvider: Eip1193Provider) => {
     try {
-      const currentChainHex = await ethereum.request({ method: 'eth_chainId' });
-      const currentId = parseInt(currentChainHex, 16);
-      // Strictly verify Chain ID 61997 before displaying balance as test GEN
+      const currentChainHex = await activeProvider.request({ method: 'eth_chainId' });
+      const currentId = parseInt(String(currentChainHex), 16);
       if (currentId !== GENLAYER_STUDIO_NEXT.chainId) {
         setBalanceGen(null);
+        setBalanceReadFailed(false);
         return;
       }
-
-      const balanceHex = await ethereum.request({
+      const balanceHex = await activeProvider.request({
         method: 'eth_getBalance',
         params: [userAddress, 'latest'],
       });
-
-      if (balanceHex) {
-        const wei = BigInt(balanceHex);
-        if (wei === 0n) {
-          setBalanceGen('0.00');
-        } else {
-          const whole = wei / (10n ** 18n);
-          const remainderWei = wei % (10n ** 18n);
-          const fourDec = remainderWei / (10n ** 14n);
-          if (whole === 0n && fourDec === 0n) {
-            setBalanceGen('< 0.0001');
-          } else {
-            const formatted = `${whole}.${fourDec.toString().padStart(4, '0')}`;
-            setBalanceGen(formatted);
-          }
-        }
+      if (balanceHex === undefined || balanceHex === null || balanceHex === '') {
+        setBalanceGen(null);
+        setBalanceReadFailed(true);
+        return;
+      }
+      const wei = BigInt(String(balanceHex));
+      setBalanceReadFailed(false);
+      if (wei === 0n) {
+        setBalanceGen('0.00');
+        return;
+      }
+      const whole = wei / 10n ** 18n;
+      const remainderWei = wei % 10n ** 18n;
+      const fourDec = remainderWei / 10n ** 14n;
+      if (whole === 0n && fourDec === 0n) {
+        setBalanceGen('< 0.0001');
+      } else {
+        setBalanceGen(`${whole}.${fourDec.toString().padStart(4, '0')}`);
       }
     } catch {
       setBalanceGen(null);
+      setBalanceReadFailed(true);
     }
-  };
-
-  const handleAccountsChanged = (accounts: string[]) => {
-    if (accounts.length > 0) {
-      setAccount(accounts[0]);
-      setError(null);
-      updateBalance(accounts[0]);
-    } else {
-      setAccount(null);
-      setBalanceGen(null);
-    }
-  };
-
-  const handleChainChanged = (chainHex: string) => {
-    const id = parseInt(chainHex, 16);
-    setChainId(id);
-    if (account) {
-      updateBalance(account);
-    } else {
-      setBalanceGen(null);
-    }
-  };
+  }, []);
 
   useEffect(() => {
-    if (!ethereum) return;
+    if (typeof window === 'undefined') return;
 
-    ethereum
+    const onAnnounce = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      const info = detail?.info;
+      const announced = detail?.provider;
+      if (!info || !announced) return;
+      const wallet: DiscoveredWallet = {
+        uuid: String(info.uuid || info.rdns || `eip6963-${eip6963.current.length}`),
+        name: String(info.name || 'Injected wallet'),
+        rdns: String(info.rdns || info.uuid || `eip6963.${eip6963.current.length}`),
+        provider: announced,
+      };
+      eip6963.current = [...eip6963.current.filter((item) => item.rdns !== wallet.rdns), wallet];
+      refreshDiscovery();
+    };
+
+    window.addEventListener('eip6963:announceProvider', onAnnounce as EventListener);
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+    refreshDiscovery();
+    return () => {
+      window.removeEventListener('eip6963:announceProvider', onAnnounce as EventListener);
+    };
+  }, [refreshDiscovery]);
+
+  useEffect(() => {
+    if (!provider) return;
+
+    const handleAccountsChanged = (accounts: unknown) => {
+      const list = Array.isArray(accounts) ? accounts.map(String) : [];
+      if (list.length > 0) {
+        setAccount(list[0]);
+        setError(null);
+        updateBalance(list[0], provider);
+      } else {
+        setAccount(null);
+        setBalanceGen(null);
+        setBalanceReadFailed(false);
+      }
+    };
+
+    const handleChainChanged = (chainHex: unknown) => {
+      const id = parseInt(String(chainHex), 16);
+      setChainId(Number.isFinite(id) ? id : null);
+      const current = accountRef.current;
+      if (current) {
+        updateBalance(current, provider);
+      } else {
+        setBalanceGen(null);
+      }
+    };
+
+    provider.on?.('accountsChanged', handleAccountsChanged);
+    provider.on?.('chainChanged', handleChainChanged);
+
+    const session = readWalletSession(getLocalStorage());
+    provider
       .request({ method: 'eth_chainId' })
-      .then((hex: string) => {
-        const id = parseInt(hex, 16);
-        setChainId(id);
-        ethereum
-          .request({ method: 'eth_accounts' })
-          .then((accounts: string[]) => {
-            if (accounts.length > 0) {
-              setAccount(accounts[0]);
-              if (id === GENLAYER_STUDIO_NEXT.chainId) {
-                updateBalance(accounts[0]);
-              }
+      .then((hex) => {
+        const id = parseInt(String(hex), 16);
+        setChainId(Number.isFinite(id) ? id : null);
+        if (!shouldAdoptAuthorizedAccounts(session)) {
+          return;
+        }
+        return provider.request({ method: 'eth_accounts' }).then((accounts) => {
+          const list = Array.isArray(accounts) ? accounts.map(String) : [];
+          if (list.length > 0) {
+            setAccount(list[0]);
+            if (id === GENLAYER_STUDIO_NEXT.chainId) {
+              updateBalance(list[0], provider);
             }
-          })
-          .catch(() => {});
+          }
+        });
       })
       .catch(() => {});
 
-    ethereum.on?.('accountsChanged', handleAccountsChanged);
-    ethereum.on?.('chainChanged', handleChainChanged);
-
     return () => {
-      ethereum.removeListener?.('accountsChanged', handleAccountsChanged);
-      ethereum.removeListener?.('chainChanged', handleChainChanged);
+      provider.removeListener?.('accountsChanged', handleAccountsChanged);
+      provider.removeListener?.('chainChanged', handleChainChanged);
     };
-  }, []);
+  }, [provider, updateBalance]);
 
-  const connectWallet = async () => {
-    if (!ethereum) {
-      setError('No EIP-1193 compatible wallet detected. Please install MetaMask or a web3 provider.');
+  const connectWallet = async (rdns?: string) => {
+    const discovered = refreshDiscovery();
+    if (discovered.length === 0) {
+      setError('No injected EIP-1193 wallet detected. Install a browser wallet such as MetaMask, then return here. CharterFlow never asks for a seed phrase or private key.');
       return;
     }
+    const chosen = selectWalletByRdns(discovered, rdns || selectedRdns);
+    if (!chosen) {
+      setError('Multiple injected wallets detected. Choose one wallet to connect. The app does not claim support for wallets it cannot see as EIP-1193 providers.');
+      return;
+    }
+    setSelectedRdns(chosen.rdns);
     setIsConnecting(true);
     setError(null);
     try {
-      const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
-      const hexChain = await ethereum.request({ method: 'eth_chainId' });
-      const id = parseInt(hexChain, 16);
-      setChainId(id);
-      if (accounts && accounts.length > 0) {
-        setAccount(accounts[0]);
+      const accounts = await chosen.provider.request({ method: 'eth_requestAccounts' });
+      const hexChain = await chosen.provider.request({ method: 'eth_chainId' });
+      const id = parseInt(String(hexChain), 16);
+      setChainId(Number.isFinite(id) ? id : null);
+      const list = Array.isArray(accounts) ? accounts.map(String) : [];
+      if (list.length > 0) {
+        setAccount(list[0]);
+        writeWalletSession(getLocalStorage(), { status: 'connected', rdns: chosen.rdns });
         if (id === GENLAYER_STUDIO_NEXT.chainId) {
-          await updateBalance(accounts[0]);
+          await updateBalance(list[0], chosen.provider);
+        } else {
+          setBalanceGen(null);
         }
       }
-    } catch (err: any) {
-      setError(err?.message || 'Failed to connect wallet');
+    } catch (err: unknown) {
+      const classified = classifyWalletError(err);
+      setError(classified.message);
     } finally {
       setIsConnecting(false);
     }
   };
 
-  /**
-   * Honest Session Clearing:
-   * EIP-1193 providers (MetaMask, Rabby) remain authorized in the browser extension.
-   * Clearing session removes local React application state without claiming to sever the extension's provider connection.
-   */
   const disconnectWallet = () => {
     setAccount(null);
     setBalanceGen(null);
+    setBalanceReadFailed(false);
+    setError(null);
+    writeWalletSession(getLocalStorage(), { status: 'cleared', rdns: selectedRdns });
   };
 
   const switchToStudioNext = async () => {
-    if (!ethereum) return;
+    if (!provider) {
+      setError('No injected wallet selected. Connect a wallet before adding or switching to chain 61997.');
+      return;
+    }
     setError(null);
     try {
-      await ethereum.request({
+      await provider.request({
         method: 'wallet_switchEthereumChain',
         params: [{ chainId: GENLAYER_STUDIO_NEXT.chainIdHex }],
       });
-    } catch (switchError: any) {
-      // 4902 indicates chain has not been added to wallet
-      if (switchError.code === 4902) {
+    } catch (switchError: unknown) {
+      const classified = classifyWalletError(switchError);
+      if (classified.code === 4902) {
         try {
-          await ethereum.request({
+          await provider.request({
             method: 'wallet_addEthereumChain',
             params: [
               {
@@ -196,17 +296,23 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               },
             ],
           });
-        } catch (addError: any) {
-          setError(addError?.message || 'Could not add Studio Next network');
+        } catch (addError: unknown) {
+          setError(classifyWalletError(addError).message);
         }
       } else {
-        setError(switchError?.message || 'Could not switch to Studio Next network');
+        setError(classified.message);
       }
     }
   };
 
   const isConnected = !!account;
   const isCorrectNetwork = chainId === GENLAYER_STUDIO_NEXT.chainId;
+  const balanceLabel = formatWalletBalanceLabel({
+    isConnected,
+    isCorrectNetwork,
+    balanceGen,
+    balanceReadFailed,
+  });
 
   return (
     <WalletContext.Provider
@@ -217,10 +323,17 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         isCorrectNetwork,
         isConnecting,
         balanceGen,
+        balanceReadFailed,
         error,
+        wallets,
+        selectedWallet,
+        provider,
+        walletInstalled: wallets.length > 0,
+        needsWalletChoice: wallets.length > 1 && !account,
         connectWallet,
         disconnectWallet,
         switchToStudioNext,
+        balanceLabel,
       }}
     >
       {children}

@@ -7,13 +7,14 @@ import {
   type PreparedTransaction,
 } from '../services/transactionService';
 import { TransactionModal } from '../components/TransactionModal';
+import { canNominate } from '../services/permissions';
 import type { Round, ProposalDraft } from '../types';
 
 export const NominateProposalPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { adapter, isDesignPreview, refreshData, refreshKey } = useData();
-  const { account, chainId, isConnected, connectWallet } = useWallet();
+  const { account, chainId, isConnected, connectWallet, provider, isCorrectNetwork } = useWallet();
 
   const roundId = id || '';
   const [round, setRound] = useState<Round | null>(null);
@@ -193,15 +194,23 @@ export const NominateProposalPage: React.FC = () => {
   const isDescriptionValid = workDescription.trim().length >= 40;
   const isDeliverablesValid = deliverablesText.trim().length >= 20;
 
-  const canSubmit =
+  const nominatePermission = canNominate({
+    connected: isConnected,
+    correctChain: isCorrectNetwork,
+    round,
+    account,
+  });
+
+  const formValid =
     isRecipientValid &&
     isDistinctFromNominator &&
     isAmountValid &&
     isDirectiveValid &&
     isDescriptionValid &&
     isDeliverablesValid &&
-    attested &&
-    (!isConnected || isMember);
+    attested;
+
+  const canSubmit = formValid && (isDesignPreview || nominatePermission.allowed);
 
   const handleSaveDraft = () => {
     const draft: ProposalDraft = {
@@ -229,8 +238,12 @@ export const NominateProposalPage: React.FC = () => {
       await connectWallet();
       return;
     }
-    if (!chainId || chainId !== 61997) {
-      setTxError('Wallet network unverified. Connect an EIP-1193 wallet on GenLayer Studio Next (Chain ID 61997).');
+    if (!provider) {
+      setTxError('No injected EIP-1193 provider selected.');
+      return;
+    }
+    if (!chainId || chainId !== 61997 || !isCorrectNetwork) {
+      setTxError('Wallet network unverified. Switch to GenLayer Studio Next (Chain ID 61997) with an explicit click.');
       return;
     }
     if (!round) {
@@ -247,7 +260,7 @@ export const NominateProposalPage: React.FC = () => {
 
       const prepared = await prepareActionTransaction({
         action: 'nominate_proposal',
-        provider: (window as any).ethereum,
+        provider,
         account,
         chainId,
         adapter,
@@ -657,6 +670,7 @@ export const NominateProposalPage: React.FC = () => {
                     <button
                       type="button"
                       disabled={!canSubmit || isPreparingTx}
+                      title={nominatePermission.reason}
                       onClick={handleInitiateNomination}
                       className={`px-6 py-2.5 font-mono text-xs uppercase font-bold transition-colors ${
                         canSubmit && !isPreparingTx
@@ -671,6 +685,7 @@ export const NominateProposalPage: React.FC = () => {
                         : 'SUBMIT NOMINATION ON-CHAIN ↗'}
                     </button>
                   </div>
+                  <p className="font-mono text-[10px] text-[#888884] w-full pt-2">{nominatePermission.reason}</p>
                   {txError && (
                     <div className="p-2 bg-[#ff3344]/10 border border-[#ff3344] text-[#ff3344] text-[10px] text-center">
                       {txError}
@@ -807,7 +822,7 @@ export const NominateProposalPage: React.FC = () => {
         isOpen={showTxModal}
         onClose={() => setShowTxModal(false)}
         prepared={preparedTx}
-        provider={(window as any).ethereum}
+        provider={provider}
         account={account || ''}
         adapter={adapter}
         onSuccess={() => {

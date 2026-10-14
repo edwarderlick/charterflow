@@ -9,11 +9,13 @@ import {
 import { TransactionModal } from '../components/TransactionModal';
 import type { Round, Proposal } from '../types';
 import { CopyButton } from '../components/CopyButton';
+import { canNominate, canCloseExpiredRound, canClaimCreatorRefund } from '../services/permissions';
+import { VerifiedDeploymentLinks } from '../components/VerifiedDeploymentLinks';
 
 export const RoundDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { adapter, isDesignPreview, refreshData, refreshKey } = useData();
-  const { account, chainId, isConnected, connectWallet } = useWallet();
+  const { account, chainId, isConnected, connectWallet, provider, isCorrectNetwork } = useWallet();
 
   const [round, setRound] = useState<Round | null>(null);
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -67,14 +69,36 @@ export const RoundDetailPage: React.FC = () => {
   const isCreator = Boolean(
     account && round && round.creatorAddress.toLowerCase() === account.toLowerCase()
   );
+  const nominateDecision = canNominate({
+    connected: isConnected,
+    correctChain: isCorrectNetwork,
+    round,
+    account,
+  });
+  const closeDecision = canCloseExpiredRound({
+    connected: isConnected,
+    correctChain: isCorrectNetwork,
+    account,
+    round,
+  });
+  const claimDecision = canClaimCreatorRefund({
+    connected: isConnected,
+    correctChain: isCorrectNetwork,
+    account,
+    round,
+  });
 
   const handleInitiateCloseRound = async () => {
     if (!isConnected || !account || !round) {
       await connectWallet();
       return;
     }
-    if (!chainId || chainId !== 61997) {
-      setTxError('Wallet network unverified. Connect an EIP-1193 wallet on GenLayer Studio Next (Chain ID 61997).');
+    if (!provider) {
+      setTxError('No injected EIP-1193 provider selected.');
+      return;
+    }
+    if (!chainId || chainId !== 61997 || !isCorrectNetwork) {
+      setTxError('Wallet network unverified. Switch to GenLayer Studio Next (Chain ID 61997) with an explicit click.');
       return;
     }
     setIsPreparingTx(true);
@@ -82,7 +106,7 @@ export const RoundDetailPage: React.FC = () => {
     try {
       const prepared = await prepareActionTransaction({
         action: 'close_round_and_refund',
-        provider: (window as any).ethereum,
+        provider,
         account,
         chainId,
         adapter,
@@ -102,8 +126,12 @@ export const RoundDetailPage: React.FC = () => {
       await connectWallet();
       return;
     }
-    if (!chainId || chainId !== 61997) {
-      setTxError('Wallet network unverified. Connect an EIP-1193 wallet on GenLayer Studio Next (Chain ID 61997).');
+    if (!provider) {
+      setTxError('No injected EIP-1193 provider selected.');
+      return;
+    }
+    if (!chainId || chainId !== 61997 || !isCorrectNetwork) {
+      setTxError('Wallet network unverified. Switch to GenLayer Studio Next (Chain ID 61997) with an explicit click.');
       return;
     }
     setIsPreparingTx(true);
@@ -111,7 +139,7 @@ export const RoundDetailPage: React.FC = () => {
     try {
       const prepared = await prepareActionTransaction({
         action: 'claim_creator_refund',
-        provider: (window as any).ethereum,
+        provider,
         account,
         chainId,
         adapter,
@@ -260,6 +288,7 @@ export const RoundDetailPage: React.FC = () => {
                 <span className="text-[#383838]">/</span>
                 <span className="text-[#c8c6c2]">CHAIN ID: 61997 · STUDIO NEXT</span>
               </div>
+              <VerifiedDeploymentLinks compact />
               <h1 className="font-['Space_Grotesk'] text-2xl sm:text-4xl uppercase font-bold text-[#e5e2e1] leading-tight">
                 {round.title}
               </h1>
@@ -271,9 +300,14 @@ export const RoundDetailPage: React.FC = () => {
             <div className="flex flex-wrap items-center gap-3">
               <Link
                 to={`/rounds/${round.id}/nominate`}
-                className="px-6 py-3 bg-[#ff5719] text-[#521300] font-mono text-xs uppercase font-bold hover:bg-white hover:text-black transition-colors flex items-center gap-2"
+                title={nominateDecision.reason}
+                className={`px-6 py-3 font-mono text-xs uppercase font-bold transition-colors flex items-center gap-2 ${
+                  nominateDecision.allowed
+                    ? 'bg-[#ff5719] text-[#521300] hover:bg-white hover:text-black'
+                    : 'bg-[#201f1f] text-[#c8c6c2] border border-[#2a2a2a] hover:text-white'
+                }`}
               >
-                <span>NOMINATE PROPOSAL</span>
+                <span>{nominateDecision.allowed ? 'NOMINATE PROPOSAL' : 'NOMINATE (SEE WHY)'}</span>
                 <span>↗</span>
               </Link>
               <button
@@ -462,8 +496,12 @@ export const RoundDetailPage: React.FC = () => {
                 )}
               </div>
               <p className="font-['Hanken_Grotesk'] text-xs text-[#888884]">
-                Authoritative on-chain rules: Round can be closed once deadline has expired and all active proposal reservations are settled (reserved = 0).
+                Authoritative on-chain rules: Round can be closed once deadline has expired and all active proposal reservations are settled (reserved = 0). UI gating is guidance.
               </p>
+              <p className="font-mono text-[10px] text-[#888884]">{closeDecision.reason}</p>
+              {round.status === 'CLOSED' && (
+                <p className="font-mono text-[10px] text-[#888884]">{claimDecision.reason}</p>
+              )}
               {txError && (
                 <div className="text-[#ff3344] text-[11px] font-mono">
                   ERROR: {txError}
@@ -472,14 +510,14 @@ export const RoundDetailPage: React.FC = () => {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {round.status === 'ACTIVE' && (
+              {(round.status === 'ACTIVE' || round.status === 'ACTIVE_VOTING') && (
                 <button
                   type="button"
                   onClick={handleInitiateCloseRound}
-                  disabled={isPreparingTx || !isCreator}
-                  title={!isCreator ? 'Only the round creator wallet can close this round' : 'Close round and return unreserved funds'}
+                  disabled={isPreparingTx || !closeDecision.allowed}
+                  title={closeDecision.reason}
                   className={`px-4 py-2 uppercase font-bold transition-colors flex items-center gap-2 ${
-                    isCreator
+                    closeDecision.allowed
                       ? 'bg-[#ff5719] text-[#521300] hover:bg-white hover:text-black cursor-pointer'
                       : 'bg-[#201f1f] text-[#555] border border-[#2a2a2a] cursor-not-allowed'
                   }`}
@@ -492,10 +530,10 @@ export const RoundDetailPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleInitiateClaimRefund}
-                  disabled={isPreparingTx || !isCreator}
-                  title={!isCreator ? 'Only the round creator wallet can claim creator refund' : 'Claim remaining unallocated treasury balance'}
+                  disabled={isPreparingTx || !claimDecision.allowed}
+                  title={claimDecision.reason}
                   className={`px-4 py-2 uppercase font-bold transition-colors flex items-center gap-2 ${
-                    isCreator
+                    claimDecision.allowed
                       ? 'bg-[#00e599] text-black hover:bg-white cursor-pointer'
                       : 'bg-[#201f1f] text-[#555] border border-[#2a2a2a] cursor-not-allowed'
                   }`}
@@ -894,7 +932,7 @@ export const RoundDetailPage: React.FC = () => {
           setPreparedTx(null);
         }}
         prepared={preparedTx}
-        provider={(window as any).ethereum}
+        provider={provider}
         account={account || ''}
         adapter={adapter}
         onSuccess={() => {

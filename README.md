@@ -40,6 +40,7 @@ npm --prefix frontend ci
 npm run test:safety
 npm run test:frontend-reads
 npm run test:frontend-writes
+npm run test:wallet-steward
 npm run build:frontend
 npm run lint:frontend
 pytest tests/test_charterflow_core.py
@@ -59,6 +60,17 @@ npm run dev
 ```
 
 Local app: `http://localhost:5173/` — checklist: `docs/LOCAL_WALKTHROUGH.md`. Live mode currently shows Studio Next `gen_call` `-32603` errors. Do not treat design-preview fixtures as chain evidence.
+
+## Test CharterFlow (stewards)
+
+In-app guide: `http://localhost:5173/test`. You do **not** need a wallet or test GEN to inspect the project.
+
+1. **Wallet-free browsing.** Leave DESIGN PREVIEW off. Open `/rounds`, `/rounds/rnd-pilot-354517`, or a proposal URL. Public reads use the Studio Next RPC. A failed `gen_call` must show a **read error**, never “no rounds” or fixture grants.
+2. **Connect your own injected EIP-1193 wallet.** The app uses `eth_requestAccounts` and EIP-6963 when several wallets are injected. It does not claim WalletConnect or other connectors it cannot see. It never asks for a seed phrase or private key. After connect, click to switch/add Studio Next (chain `61997` / `0xf22d`, RPC `https://studio-next.genlayer.com/api`). The app will not auto-switch or auto-sign.
+3. **Test GEN.** Studio Next funds come from the built-in Studio faucet (💧 in the account selector at [studio-dev.genlayer.com](https://studio-dev.genlayer.com/)). Docs: [GenLayer networks](https://docs.genlayer.com/developers/networks). The public Asimov faucet (`testnet-faucet.genlayer.foundation`) funds chain `4221` and does **not** fund this app.
+4. **Roles.** Any funded 61997 wallet may create a round (1 GEN minimum). Only a listed committee member may nominate or vote. A recipient on the committee cannot vote on their own proposal. `evaluate_charter_fit` is permissionless but paid. Only the named recipient may withdraw. Only the round creator may close an expired round and claim the refund. Permissionless expired-proposal settlement is shown only when that deadline has actually passed. One connected wallet cannot vote or withdraw for someone else.
+5. **Verified deployment.** Contract `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`, chain `61997`, deploy tx `0xc5c220571c8d890c04715ce65cfd23ae92a0d49e696c596979591f771ab734e4`, create_round `0x1476320746c0efda5f97d2db6256c571c6da7adff7c494af33031bf9adfb0bdc`. Round `rnd-pilot-354517` is a locked recovery case; Stage 2 is **INCONCLUSIVE**. Evidence: `docs/PUBLIC_EVIDENCE.md`.
+6. **Limitations.** Studio Next `gen_call` currently returns JSON-RPC `-32603` rollback. Live ledgers cannot be proven from that path. Do not spend GEN just to look around. Builder Portal is not submitted from this work.
 
 Static-host plan (not deployed): `docs/FRONTEND_STATIC_HOSTING.md`. Live mode must show RPC errors honestly; design preview stays explicitly labeled.
 

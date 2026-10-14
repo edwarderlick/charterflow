@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Barcode } from './Barcode';
 
 export const Footer: React.FC = () => {
@@ -53,6 +54,12 @@ export const Footer: React.FC = () => {
             EXPLORATION & TOOLS
           </span>
           <ul className="flex flex-col gap-2 text-[#888884]">
+            <li>
+              <Link to="/test" className="hover:text-[#ff5719] transition-colors flex items-center gap-1">
+                <span>Test CharterFlow</span>
+                <span>↗</span>
+              </Link>
+            </li>
             <li>
               <a
                 href="https://explorer-studio-dev.genlayer.com/"

@@ -20,7 +20,9 @@ import { NominateProposalPage } from './pages/NominateProposalPage';
 import { ProposalDetailPage } from './pages/ProposalDetailPage';
 import { MyActivityPage } from './pages/MyActivityPage';
 import { TransactionNetworkStatesPage } from './pages/TransactionNetworkStatesPage';
+import { TestCharterFlowPage } from './pages/TestCharterFlowPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { WalletSessionBanner } from './components/WalletSessionBanner';
 
 const ScrollToTop: React.FC = () => {
   const { pathname } = useLocation();
@@ -38,11 +40,13 @@ export const App: React.FC = () => {
           <ScrollToTop />
           <div className="flex flex-col min-h-screen bg-[#131313] text-[#e5e2e1]">
             <Header />
+            <WalletSessionBanner />
             <DesignPreviewBanner />
             <main className="flex-1 flex flex-col">
               <Routes>
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/how-it-works" element={<HowItWorksPage />} />
+                <Route path="/test" element={<TestCharterFlowPage />} />
                 <Route path="/rounds" element={<ExploreRoundsPage />} />
                 <Route path="/rounds/new" element={<CreateRoundPage />} />
                 <Route path="/rounds/create" element={<CreateRoundPage />} />

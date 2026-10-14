@@ -10,7 +10,12 @@ import { studioDevnet } from 'genlayer-js/chains';
 import { NETWORK_CONFIG, isContractConfigured, VERIFIED_DEPLOYMENT } from '../config/network';
 import { GENLAYER_STUDIO_NEXT } from '../context/WalletContext';
 import { type DataAccessAdapter } from './dataAccess';
+import { expectedEffectForAction } from './permissions';
 import type { Proposal } from '../types';
+
+function describeExpectedEffect(action: ActionType): string {
+  return expectedEffectForAction(action);
+}
 
 export type ActionType =
   | 'create_round'
@@ -92,6 +97,7 @@ export interface PreparedTransaction {
   payableValueWei: bigint;
   feeValueWei: bigint;
   totalValueWei: bigint;
+  expectedEffect: string;
   isBlocked: boolean;
   blockReason?: string;
   quotedAccount: string;
@@ -946,11 +952,14 @@ export async function prepareActionTransaction(
       'Fee policy mismatch detected: live chain fee price caps do not match the quoted distribution hash. Action is blocked to prevent gas loss or stale execution.';
   }
 
-  // Message-emitting actions: withdraw_credit and claim_creator_refund emit external transfers.
+  // Message-emitting actions require a fresh positive native-message fee estimate.
   if (action === 'withdraw_credit' || action === 'claim_creator_refund') {
-    isBlocked = true;
-    blockReason =
-      'Submission disabled: emit_transfer requires verified message fee budget allocation. Fee measurement cannot be completed in local test mode and must be verified against deployed contract before live broadcast.';
+    const messageFees = quote.breakdown?.messageFees;
+    if (messageFees === undefined || messageFees === null || BigInt(messageFees) <= 0n) {
+      isBlocked = true;
+      blockReason =
+        'Submission disabled: emit_transfer requires a fresh positive native-message fee estimate (quote.breakdown.messageFees > 0). UI gating is guidance; the contract is authoritative.';
+    }
   }
 
   return {
@@ -964,6 +973,7 @@ export async function prepareActionTransaction(
     payableValueWei,
     feeValueWei: quote.feeValue,
     totalValueWei: quote.total,
+    expectedEffect: describeExpectedEffect(action),
     isBlocked,
     blockReason,
     quotedAccount: account.toLowerCase(),

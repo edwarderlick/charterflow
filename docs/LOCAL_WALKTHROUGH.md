@@ -17,6 +17,8 @@ Pinned live target: chain `61997`, contract `0x408DcCc27fC7b4455E82ffe78C824cda4
 7. `/activity` — `NO WALLET CONNECTED` / disconnected. No sample addresses substituted.
 8. `/network` — chain 61997, Studio Next RPC, disconnected. Lifecycle matrix labeled as design preview.
 9. Toggle **DESIGN PREVIEW** on, confirm banners, then off — live error state returns.
+10. `/test` — steward guide: wallet-free browsing, connect/switch, Studio faucet honesty, role matrix, verified links, `gen_call` outage. `#faucet` must not send you to the Asimov (4221) faucet.
+11. Wallet journey (desktop + ~390px): no wallet → NO WALLET copy; one injected wallet → CONNECT; two injected wallets → CHOOSE WALLET; reject connect → 4001 copy; CLEAR SESSION then reload must not silent-reconnect; wrong chain shows SWITCH only after connect (never auto-switch).
 
 ## Agent walkthrough recorded 2026-10-14 (headless Chrome against live Vite)
 

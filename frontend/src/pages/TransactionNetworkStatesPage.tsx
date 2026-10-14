@@ -80,14 +80,29 @@ export const TransactionNetworkStatesPage: React.FC = () => {
             </div>
 
             <div className="flex flex-wrap items-center gap-3 font-mono text-xs">
-              <button
-                type="button"
-                onClick={switchToStudioNext}
-                className="px-6 py-3 bg-[#ff5719] text-[#521300] hover:bg-white hover:text-black font-bold uppercase tracking-wider flex items-center gap-2 transition-colors"
-              >
-                <span>SWITCH TO CHAIN 61997</span>
-                <span className="material-symbols-outlined text-[16px]">north_east</span>
-              </button>
+              {isConnected && !isCorrectNetwork ? (
+                <button
+                  type="button"
+                  onClick={switchToStudioNext}
+                  className="px-6 py-3 bg-[#ff5719] text-[#521300] hover:bg-white hover:text-black font-bold uppercase tracking-wider flex items-center gap-2 transition-colors"
+                >
+                  <span>SWITCH TO CHAIN 61997</span>
+                  <span className="material-symbols-outlined text-[16px]">north_east</span>
+                </button>
+              ) : isConnected ? (
+                <span className="px-6 py-3 bg-[#201f1f] text-[#00e599] border border-[#2a2a2a] font-bold uppercase">
+                  On chain 61997
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void connectWallet()}
+                  className="px-6 py-3 bg-[#ff5719] text-[#521300] hover:bg-white hover:text-black font-bold uppercase tracking-wider flex items-center gap-2 transition-colors"
+                >
+                  <span>CONNECT WALLET</span>
+                  <span className="material-symbols-outlined text-[16px]">north_east</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -445,7 +460,7 @@ export const TransactionNetworkStatesPage: React.FC = () => {
           <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto font-mono text-xs">
             <button
               type="button"
-              onClick={connectWallet}
+              onClick={() => void connectWallet()}
               className="w-full sm:w-auto px-6 py-3.5 bg-[#ff5719] text-[#521300] font-bold uppercase hover:bg-white hover:text-black transition-colors"
             >
               CONNECT TESTNET WALLET

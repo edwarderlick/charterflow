@@ -8,6 +8,7 @@
     "test:safety": "node scripts/test_runner_safety.js",
     "test:frontend-reads": "npx tsx scripts/test_frontend_reads.ts",
     "test:frontend-writes": "npx tsx scripts/test_frontend_writes.ts",
+    "test:wallet-steward": "npx tsx scripts/test_wallet_steward.ts",
     "test": "node scripts/test_runner_safety.js",
     "build:frontend": "npm --prefix frontend run build",
     "lint:frontend": "npm --prefix frontend run lint"

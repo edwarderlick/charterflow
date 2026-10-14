@@ -4,6 +4,7 @@ import { Barcode } from '../components/Barcode';
 import { useData } from '../services/dataAccess';
 import type { Round } from '../types';
 import { NETWORK_CONFIG, isContractConfigured } from '../config/network';
+import { VerifiedDeploymentLinks } from '../components/VerifiedDeploymentLinks';
 
 export const LandingPage: React.FC = () => {
   const { adapter, isDesignPreview, setDesignPreview, refreshData, refreshKey } = useData();
@@ -104,7 +105,14 @@ export const LandingPage: React.FC = () => {
                 >
                   CREATE A ROUND <span>↗</span>
                 </Link>
+                <Link
+                  to="/test"
+                  className="px-6 py-3.5 bg-[#201f1f] text-[#ff5719] font-['Space_Grotesk'] text-sm uppercase font-bold tracking-wider flex items-center gap-2 border border-[#2a2a2a] hover:bg-[#2a2a2a] transition-all"
+                >
+                  TEST CHARTERFLOW <span>↗</span>
+                </Link>
               </div>
+              <VerifiedDeploymentLinks compact />
             </div>
 
             {/* Hardware Specification Box */}

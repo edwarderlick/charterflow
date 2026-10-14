@@ -11,7 +11,7 @@ import type { UserActivity } from '../types';
 
 export const MyActivityPage: React.FC = () => {
   const { adapter, isDesignPreview, refreshData, refreshKey } = useData();
-  const { account, chainId, isConnected, connectWallet } = useWallet();
+  const { account, chainId, isConnected, connectWallet, provider, isCorrectNetwork } = useWallet();
 
   const [activity, setActivity] = useState<UserActivity | null>(null);
   const [loading, setLoading] = useState(false);
@@ -69,15 +69,19 @@ export const MyActivityPage: React.FC = () => {
       );
       return;
     }
-    if (!chainId || chainId !== 61997) {
-      setModalNotice('Wallet network unverified. Connect an EIP-1193 wallet on GenLayer Studio Next (Chain ID 61997).');
+    if (!provider) {
+      setModalNotice('No injected EIP-1193 provider selected.');
+      return;
+    }
+    if (!chainId || chainId !== 61997 || !isCorrectNetwork) {
+      setModalNotice('Wallet network unverified. Switch to GenLayer Studio Next (Chain ID 61997) with an explicit click.');
       return;
     }
     setIsPreparingTx(true);
     try {
       const prepared = await prepareActionTransaction({
         action: 'withdraw_credit',
-        provider: (window as any).ethereum,
+        provider,
         account,
         chainId,
         adapter,
@@ -689,7 +693,7 @@ export const MyActivityPage: React.FC = () => {
           setPreparedTx(null);
         }}
         prepared={preparedTx}
-        provider={(window as any).ethereum}
+        provider={provider}
         account={account || ''}
         adapter={adapter}
         onSuccess={() => {

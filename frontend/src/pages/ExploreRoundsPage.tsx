@@ -3,12 +3,14 @@ import { Link } from 'react-router-dom';
 import { useData } from '../services/dataAccess';
 import { useWallet } from '../context/WalletContext';
 import type { Round } from '../types';
-import { NETWORK_CONFIG, isContractConfigured } from '../config/network';
+import { NETWORK_CONFIG, isContractConfigured, VERIFIED_DEPLOYMENT } from '../config/network';
+import { VerifiedDeploymentLinks } from '../components/VerifiedDeploymentLinks';
+import { canNominate } from '../services/permissions';
 
 
 export const ExploreRoundsPage: React.FC = () => {
   const { adapter, isDesignPreview, setDesignPreview, refreshData, refreshKey } = useData();
-  const { account } = useWallet();
+  const { account, isConnected, isCorrectNetwork } = useWallet();
 
   const [rounds, setRounds] = useState<Round[]>([]);
   const [loading, setLoading] = useState(true);
@@ -141,8 +143,9 @@ export const ExploreRoundsPage: React.FC = () => {
               Explore Grant Rounds
             </h1>
             <p className="font-['Hanken_Grotesk'] text-sm sm:text-base text-[#c8c6c2] max-w-3xl">
-              Verifiable industrial treasuries governed by frozen natural language charters on GenLayer Studio Next. Multi-node AI validator consensus evaluates charter fit, followed by member voting to authorize grant credits and recipient withdrawals.
+              Verifiable industrial treasuries governed by frozen natural language charters on GenLayer Studio Next. Multi-node AI validator consensus evaluates charter fit, followed by member voting to authorize grant credits and recipient withdrawals. Wallet connection is not required to inspect rounds.
             </p>
+            <VerifiedDeploymentLinks compact />
           </div>
           <div>
             <Link
@@ -487,12 +490,28 @@ export const ExploreRoundsPage: React.FC = () => {
                         PROPOSALS: {round.proposalsCount.inReview} IN REVIEW / {round.proposalsCount.decided} DECIDED
                       </span>
                       <div className="flex items-center gap-2">
-                        <Link
-                          to={`/rounds/${round.id}/nominate`}
-                          className="px-3 py-1.5 bg-[#2a2a2a] text-[#e5e2e1] hover:bg-[#353534] font-bold uppercase transition-colors"
-                        >
-                          NOMINATE
-                        </Link>
+                        {(() => {
+                          const nominateDecision = canNominate({
+                            connected: isConnected,
+                            correctChain: isCorrectNetwork,
+                            round,
+                            account,
+                          });
+                          const isRecovery = round.id.toLowerCase() === VERIFIED_DEPLOYMENT.intendedRoundId.toLowerCase();
+                          return (
+                            <Link
+                              to={`/rounds/${round.id}/nominate`}
+                              title={nominateDecision.reason}
+                              className={`px-3 py-1.5 font-bold uppercase transition-colors ${
+                                isRecovery
+                                  ? 'bg-[#201f1f] text-[#888884] border border-[#2a2a2a]'
+                                  : 'bg-[#2a2a2a] text-[#e5e2e1] hover:bg-[#353534]'
+                              }`}
+                            >
+                              {isRecovery ? 'NOMINATE BLOCKED' : 'NOMINATE'}
+                            </Link>
+                          );
+                        })()}
                         <Link
                           to={`/rounds/${round.id}`}
                           className="px-3 py-1.5 bg-[#ff5719] text-[#521300] hover:bg-white hover:text-black font-bold uppercase transition-colors flex items-center gap-1"

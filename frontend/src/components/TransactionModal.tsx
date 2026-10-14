@@ -208,8 +208,15 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           </div>
           <div className="flex justify-between text-[#888884] text-[11px]">
             <span>NETWORK:</span>
-            <span className="text-[#00e599] font-bold">CHAIN 61997 (STUDIO DEVNET)</span>
+            <span className="text-[#00e599] font-bold">CHAIN {prepared.quotedChainId} (STUDIO NEXT)</span>
           </div>
+          <div className="flex justify-between text-[#888884] text-[11px]">
+            <span>SIGNER:</span>
+            <span className="text-[#e5e2e1]">{prepared.quotedAccount}</span>
+          </div>
+          <p className="text-[11px] text-[#c8c6c2] pt-1 border-t border-[#201f1f]">
+            EXPECTED EFFECT: {prepared.expectedEffect}
+          </p>
         </div>
 
         {/* Separate Payable Value vs Protocol-Fee Deposit */}
@@ -261,6 +268,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               MSG FEES: <span className="text-[#c8c6c2]">{weiToGen(prepared.quote.breakdown.messageFees)} GEN</span>
             </div>
           </div>
+          {(prepared.action === 'withdraw_credit' || prepared.action === 'claim_creator_refund') && (
+            <p className="text-[10px] text-[#ffb800] pt-1">
+              Native-message fees must be a fresh positive estimate before this payout can be signed. Zero or missing message fees block broadcast.
+            </p>
+          )}
         </div>
 
         {/* Policy Mismatch Block Notice */}

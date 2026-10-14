@@ -159,6 +159,7 @@ class MockEip1193Provider {
 interface MockKitOptions {
   verificationStatus?: 'verified' | 'mismatch' | 'unavailable';
   feeValue?: bigint;
+  messageFees?: bigint;
   userValue?: bigint;
   submitError?: Error;
   submittedTxId?: `0x${string}`;
@@ -194,7 +195,7 @@ function buildMockPolicyQuote(opts: MockKitOptions, userValue: bigint): PolicyQu
     breakdown: {
       timeUnitFees: feeValue / 2n,
       executionBudget: feeValue / 2n,
-      messageFees: 0n,
+      messageFees: opts.messageFees ?? 0n,
     },
     caps: {
       genPerTimeUnit: 1000000000n,
@@ -576,7 +577,7 @@ async function runWriteTests() {
     });
     assert(prepWithdraw.isBlocked === true, 'withdraw_credit submission is blocked');
     assert(
-      prepWithdraw.blockReason?.includes('emit_transfer requires verified message fee budget allocation') ?? false,
+      prepWithdraw.blockReason?.includes('emit_transfer requires a fresh positive native-message fee estimate') ?? false,
       'withdraw_credit provides explicit diagnostic regarding unmeasured message fee budget'
     );
 
@@ -590,8 +591,23 @@ async function runWriteTests() {
     });
     assert(prepClaimRefund.isBlocked === true, 'claim_creator_refund submission is blocked');
     assert(
-      prepClaimRefund.blockReason?.includes('emit_transfer requires verified message fee budget allocation') ?? false,
+      prepClaimRefund.blockReason?.includes('emit_transfer requires a fresh positive native-message fee estimate') ?? false,
       'claim_creator_refund provides explicit diagnostic regarding unmeasured message fee budget'
+    );
+
+    setTransactionKitFactoryForTesting(() => buildMockKit({ messageFees: 25000000000000000n }));
+    const prepWithdrawLive = await prepareActionTransaction({
+      action: 'withdraw_credit',
+      provider,
+      account: callerAddress,
+      chainId: 61997,
+      contractAddress,
+      proposalId: 'prp-test-emit-live',
+    });
+    assert(prepWithdrawLive.isBlocked === false, 'withdraw_credit unblocks when messageFees are a positive bigint');
+    assert(
+      prepWithdrawLive.expectedEffect.includes('Named recipient'),
+      'withdraw_credit carries expectedEffect before signature'
     );
   }
 
@@ -626,6 +642,10 @@ async function runWriteTests() {
     });
 
     assert(prep.roundId === intendedRoundId, 'prepareActionTransaction sets exact roundId');
+    assert(
+      prep.expectedEffect.includes('isolated round ledger'),
+      'create_round expectedEffect is shown before signature'
+    );
     assert(prep.targetIdentifier === `create_round:${intendedRoundId}`, 'Target identifier includes exact roundId');
 
     const executed = await executeAndTrackTransaction(prep, provider, callerAddress);

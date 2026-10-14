@@ -11,7 +11,10 @@ export const Header: React.FC = () => {
     chainId,
     isConnected,
     isCorrectNetwork,
-    balanceGen,
+    balanceLabel,
+    isConnecting,
+    wallets,
+    walletInstalled,
     connectWallet,
     disconnectWallet,
     switchToStudioNext,
@@ -26,6 +29,7 @@ export const Header: React.FC = () => {
   const navLinks = [
     { label: 'Explore Rounds', to: '/rounds' },
     { label: 'How It Works', to: '/how-it-works' },
+    { label: 'Test CharterFlow', to: '/test' },
     { label: 'Create Round', to: '/rounds/new' },
     { label: 'My Activity', to: '/activity' },
     { label: 'Network', to: '/network' },
@@ -116,23 +120,15 @@ export const Header: React.FC = () => {
               </span>
               <span className="text-[#888884] text-[11px]">BALANCE:</span>
               <span className="text-[#e5e2e1] font-semibold">
-                {isConnected
-                  ? balanceGen !== null
-                    ? `${balanceGen} GEN`
-                    : isCorrectNetwork
-                    ? '0.00 GEN'
-                    : 'WRONG CHAIN'
-                  : 'NO WALLET'}
+                {balanceLabel}
               </span>
-              <a
-                href="https://studio-next.genlayer.com/"
-                target="_blank"
-                rel="noreferrer"
+              <Link
+                to="/test#faucet"
                 className="ml-1 text-[10px] text-[#ff5719] hover:underline"
-                title="Get testnet GEN from Studio Next"
+                title="Official Studio Next test GEN source"
               >
-                [+ FAUCET]
-              </a>
+                [TEST GEN]
+              </Link>
             </div>
 
             {/* Network State Pill */}
@@ -181,10 +177,17 @@ export const Header: React.FC = () => {
             ) : (
               <button
                 type="button"
-                onClick={connectWallet}
-                className="flex items-center gap-1 px-3 py-1.5 bg-[#ff5719] text-[#521300] font-bold uppercase tracking-wider text-[11px] hover:bg-white hover:text-black transition-colors"
+                onClick={() => {
+                  if (wallets.length === 1) {
+                    void connectWallet(wallets[0].rdns);
+                  } else {
+                    void connectWallet();
+                  }
+                }}
+                disabled={isConnecting}
+                className="flex items-center gap-1 px-3 py-1.5 bg-[#ff5719] text-[#521300] font-bold uppercase tracking-wider text-[11px] hover:bg-white hover:text-black transition-colors disabled:opacity-60"
               >
-                <span>CONNECT WALLET</span>
+                <span>{!walletInstalled ? 'NO WALLET' : isConnecting ? 'CONNECTING…' : wallets.length > 1 ? 'CHOOSE WALLET' : 'CONNECT WALLET'}</span>
                 <span className="material-symbols-outlined text-[14px]">account_balance_wallet</span>
               </button>
             )}
@@ -238,11 +241,7 @@ export const Header: React.FC = () => {
               <div className="flex items-center justify-between p-2 bg-[#1c1b1b]">
                 <span className="text-[#888884]">BALANCE:</span>
                 <span className="text-[#e5e2e1] font-semibold">
-                  {isConnected
-                    ? balanceGen !== null
-                      ? `${balanceGen} GEN`
-                      : 'WRONG CHAIN'
-                    : 'NO WALLET'}
+                  {balanceLabel}
                 </span>
               </div>
               <div className="flex items-center justify-between p-2 bg-[#1c1b1b]">
@@ -258,10 +257,10 @@ export const Header: React.FC = () => {
                 ) : (
                   <button
                     type="button"
-                    onClick={connectWallet}
+                    onClick={() => void connectWallet(wallets.length === 1 ? wallets[0].rdns : undefined)}
                     className="px-2 py-1 bg-[#ff5719] text-[#521300] text-[10px] font-bold uppercase"
                   >
-                    CONNECT WALLET
+                    {!walletInstalled ? 'NO WALLET' : wallets.length > 1 ? 'CHOOSE WALLET' : 'CONNECT WALLET'}
                   </button>
                 )}
               </div>

@@ -10,11 +10,17 @@ import { TransactionModal } from '../components/TransactionModal';
 import type { Proposal, Round } from '../types';
 import { CopyButton } from '../components/CopyButton';
 import { Barcode } from '../components/Barcode';
+import {
+  canEvaluateCharterFit,
+  canSettleExpiredProposal,
+  canVote,
+  canWithdrawCredit,
+} from '../services/permissions';
 
 export const ProposalDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { adapter, isDesignPreview, refreshData, refreshKey } = useData();
-  const { account, chainId, isConnected, connectWallet } = useWallet();
+  const { account, chainId, isConnected, connectWallet, provider, isCorrectNetwork } = useWallet();
 
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [round, setRound] = useState<Round | null>(null);
@@ -172,6 +178,26 @@ export const ProposalDetailPage: React.FC = () => {
     (proposal.status === 'ELIGIBLE' || proposal.status === 'VOTING') &&
     proposal.votes.deadlineRemaining === '0H REMAINING';
   const isExpirable = isSubmissionExpired || isVotingExpired;
+  const voteDecision = canVote({
+    connected: isConnected,
+    correctChain: isCorrectNetwork,
+    account,
+    round,
+    proposal,
+    hasAlreadyVoted,
+  });
+  const evaluateDecision = canEvaluateCharterFit({
+    proposal,
+    connected: isConnected,
+    correctChain: isCorrectNetwork,
+  });
+  const withdrawDecision = canWithdrawCredit({
+    connected: isConnected,
+    correctChain: isCorrectNetwork,
+    account,
+    proposal,
+  });
+  const settleDecision = canSettleExpiredProposal({ proposal, isExpirable });
 
   const handleInitiateVote = async (voteType: 'YES' | 'NO') => {
     if (isDesignPreview) {
@@ -182,8 +208,16 @@ export const ProposalDetailPage: React.FC = () => {
       await connectWallet();
       return;
     }
-    if (!chainId || chainId !== 61997) {
-      setTxError('Wallet network unverified. Connect an EIP-1193 wallet on GenLayer Studio Next (Chain ID 61997).');
+    if (!provider) {
+      setTxError('No injected EIP-1193 provider selected.');
+      return;
+    }
+    if (!chainId || chainId !== 61997 || !isCorrectNetwork) {
+      setTxError('Wallet network unverified. Switch to GenLayer Studio Next (Chain ID 61997) with an explicit click.');
+      return;
+    }
+    if (!voteDecision.allowed) {
+      setTxError(voteDecision.reason);
       return;
     }
     if (!proposal) {
@@ -195,7 +229,7 @@ export const ProposalDetailPage: React.FC = () => {
     try {
       const prepared = await prepareActionTransaction({
         action: 'cast_vote',
-        provider: (window as any).ethereum,
+        provider,
         account,
         chainId,
         adapter,
@@ -220,8 +254,16 @@ export const ProposalDetailPage: React.FC = () => {
       await connectWallet();
       return;
     }
-    if (!chainId || chainId !== 61997) {
-      setTxError('Wallet network unverified. Connect an EIP-1193 wallet on GenLayer Studio Next (Chain ID 61997).');
+    if (!provider) {
+      setTxError('No injected EIP-1193 provider selected.');
+      return;
+    }
+    if (!chainId || chainId !== 61997 || !isCorrectNetwork) {
+      setTxError('Wallet network unverified. Switch to GenLayer Studio Next (Chain ID 61997) with an explicit click.');
+      return;
+    }
+    if (!evaluateDecision.allowed) {
+      setTxError(evaluateDecision.reason);
       return;
     }
     if (!proposal) {
@@ -233,7 +275,7 @@ export const ProposalDetailPage: React.FC = () => {
     try {
       const prepared = await prepareActionTransaction({
         action: 'evaluate_charter_fit',
-        provider: (window as any).ethereum,
+        provider,
         account,
         chainId,
         adapter,
@@ -253,8 +295,16 @@ export const ProposalDetailPage: React.FC = () => {
       await connectWallet();
       return;
     }
-    if (!chainId || chainId !== 61997) {
-      setTxError('Wallet network unverified. Connect an EIP-1193 wallet on GenLayer Studio Next (Chain ID 61997).');
+    if (!provider) {
+      setTxError('No injected EIP-1193 provider selected.');
+      return;
+    }
+    if (!chainId || chainId !== 61997 || !isCorrectNetwork) {
+      setTxError('Wallet network unverified. Switch to GenLayer Studio Next (Chain ID 61997) with an explicit click.');
+      return;
+    }
+    if (!withdrawDecision.allowed) {
+      setTxError(withdrawDecision.reason);
       return;
     }
     if (!proposal) {
@@ -266,7 +316,7 @@ export const ProposalDetailPage: React.FC = () => {
     try {
       const prepared = await prepareActionTransaction({
         action: 'withdraw_credit',
-        provider: (window as any).ethereum,
+        provider,
         account,
         chainId,
         adapter,
@@ -286,8 +336,16 @@ export const ProposalDetailPage: React.FC = () => {
       await connectWallet();
       return;
     }
-    if (!chainId || chainId !== 61997) {
-      setTxError('Wallet network unverified. Connect an EIP-1193 wallet on GenLayer Studio Next (Chain ID 61997).');
+    if (!provider) {
+      setTxError('No injected EIP-1193 provider selected.');
+      return;
+    }
+    if (!chainId || chainId !== 61997 || !isCorrectNetwork) {
+      setTxError('Wallet network unverified. Switch to GenLayer Studio Next (Chain ID 61997) with an explicit click.');
+      return;
+    }
+    if (!settleDecision.allowed) {
+      setTxError(settleDecision.reason);
       return;
     }
     if (!proposal) {
@@ -299,7 +357,7 @@ export const ProposalDetailPage: React.FC = () => {
     try {
       const prepared = await prepareActionTransaction({
         action: 'settle_expired_proposal',
-        provider: (window as any).ethereum,
+        provider,
         account,
         chainId,
         adapter,
@@ -713,11 +771,11 @@ export const ProposalDetailPage: React.FC = () => {
                     <span>NO WALLET CONNECTED</span>
                   </div>
                   <p className="text-[11px] text-[#c8c6c2]">
-                    Connect your wallet to evaluate committee voting eligibility for this round.
+                    Anyone may read this proposal without a wallet. Connect a listed committee member to vote. One arbitrary wallet cannot vote for someone else.
                   </p>
                   <button
                     type="button"
-                    onClick={connectWallet}
+                    onClick={() => void connectWallet()}
                     className="w-full py-2.5 bg-[#ff5719] text-[#521300] font-bold uppercase hover:bg-white hover:text-black transition-colors"
                   >
                     CONNECT WALLET
@@ -805,15 +863,13 @@ export const ProposalDetailPage: React.FC = () => {
               )}
 
               {/* Permissionless Expiration Settlement Trigger */}
-              {isExpirable && (
+              {settleDecision.allowed && (
                 <div className="p-3 bg-[#0e0e0e] border border-[#ffb800] space-y-2 mt-3">
                   <div className="flex justify-between items-center text-[10px] text-[#ffb800] font-bold uppercase">
                     <span>DEADLINE PASSED</span>
                     <span>SETTLEMENT ELIGIBLE</span>
                   </div>
-                  <p className="text-[#c8c6c2] text-[11px]">
-                    This proposal has exceeded its deadline window. Anyone can settle it to unreserve funds.
-                  </p>
+                  <p className="text-[#c8c6c2] text-[11px]">{settleDecision.reason}</p>
                   <button
                     type="button"
                     disabled={isPreparingTx}
@@ -832,14 +888,13 @@ export const ProposalDetailPage: React.FC = () => {
                     <span>STAGE 02 // ACTIONABLE</span>
                     <span>PERMISSIONLESS TRIGGER</span>
                   </div>
-                  <p className="text-[#c8c6c2] text-[11px]">
-                    Proposal is in SUBMITTED state. Anyone can trigger the GenLayer AI validator consensus review to evaluate charter fit.
-                  </p>
+                  <p className="text-[#c8c6c2] text-[11px]">{evaluateDecision.reason}</p>
                   <button
                     type="button"
-                    disabled={isPreparingTx}
+                    disabled={isPreparingTx || !evaluateDecision.allowed}
+                    title={evaluateDecision.reason}
                     onClick={handleInitiateEvaluate}
-                    className="w-full py-2.5 bg-[#ff5719] text-[#521300] hover:bg-white hover:text-black font-bold uppercase text-center transition-colors cursor-pointer"
+                    className="w-full py-2.5 bg-[#ff5719] text-[#521300] hover:bg-white hover:text-black font-bold uppercase text-center transition-colors cursor-pointer disabled:bg-[#201f1f] disabled:text-[#888884]"
                   >
                     {isPreparingTx ? 'PREPARING REVIEW...' : 'TRIGGER AI CHARTER EVALUATION ↗'}
                   </button>
@@ -898,12 +953,14 @@ export const ProposalDetailPage: React.FC = () => {
                   </p>
                   <button
                     type="button"
-                    disabled={isPreparingTx}
+                    disabled={isPreparingTx || !withdrawDecision.allowed}
+                    title={withdrawDecision.reason}
                     onClick={handleInitiateWithdraw}
-                    className="w-full py-2.5 bg-[#00e599] text-black font-bold uppercase hover:bg-white transition-colors cursor-pointer"
+                    className="w-full py-2.5 bg-[#00e599] text-black font-bold uppercase hover:bg-white transition-colors cursor-pointer disabled:bg-[#201f1f] disabled:text-[#888884]"
                   >
                     {isPreparingTx ? 'PREPARING WITHDRAWAL...' : 'WITHDRAW GRANT ALLOCATION ↗'}
                   </button>
+                  <p className="text-[10px] text-[#888884]">{withdrawDecision.reason}</p>
                 </div>
               )}
             </div>
@@ -1067,7 +1124,7 @@ export const ProposalDetailPage: React.FC = () => {
         isOpen={showTxModal}
         onClose={() => setShowTxModal(false)}
         prepared={preparedTx}
-        provider={(window as any).ethereum}
+        provider={provider}
         account={account || ''}
         adapter={adapter}
         onSuccess={() => {
