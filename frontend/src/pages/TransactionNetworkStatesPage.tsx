@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useWallet, GENLAYER_STUDIO_NEXT } from '../context/WalletContext';
+import { NETWORK_CONFIG } from '../config/network';
 
 export const TransactionNetworkStatesPage: React.FC = () => {
   const {
@@ -194,7 +195,9 @@ export const TransactionNetworkStatesPage: React.FC = () => {
                   <div className="p-4 bg-[#0e0e0e] border border-[#2a2a2a] space-y-2 text-[11px]">
                     <div className="flex justify-between">
                       <span className="text-[#888884]">TARGET CONTRACT:</span>
-                      <span className="text-[#e5e2e1]">[DESIGN PREVIEW] 0x8a92...38f1</span>
+                      <span className="text-[#e5e2e1] break-all text-right" data-testid="tx-review-target-contract">
+                        {NETWORK_CONFIG.contractAddress}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-[#888884]">EXECUTION METHOD:</span>

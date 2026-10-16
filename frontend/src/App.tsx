@@ -21,6 +21,7 @@ import { ProposalDetailPage } from './pages/ProposalDetailPage';
 import { MyActivityPage } from './pages/MyActivityPage';
 import { TransactionNetworkStatesPage } from './pages/TransactionNetworkStatesPage';
 import { TestCharterFlowPage } from './pages/TestCharterFlowPage';
+import { DeployCorrectedPage } from './pages/DeployCorrectedPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { WalletSessionBanner } from './components/WalletSessionBanner';
 
@@ -47,6 +48,7 @@ export const App: React.FC = () => {
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/how-it-works" element={<HowItWorksPage />} />
                 <Route path="/test" element={<TestCharterFlowPage />} />
+                <Route path="/deploy-corrected" element={<DeployCorrectedPage />} />
                 <Route path="/rounds" element={<ExploreRoundsPage />} />
                 <Route path="/rounds/new" element={<CreateRoundPage />} />
                 <Route path="/rounds/create" element={<CreateRoundPage />} />

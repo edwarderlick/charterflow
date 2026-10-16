@@ -1,8 +1,8 @@
 # Public wallet and steward testing — 2026-10-14
 
-Local origin: `http://127.0.0.1:5173/` (Vite 8.3.4, PID previously 28704, HTTP 200).  
+Local origin: `http://127.0.0.1:5173/` (Vite 8.3.4, node PID **28704**, command `vite.js --host 127.0.0.1`, HTTP 200). Port 5174 is not listening; no duplicate CharterFlow Vite process was found this run.  
 Public origin: **none**. No Vercel URL exists. Wallet-free and connect/network checks were not repeated on a public host.  
-Portal: not submitted. `contracts/CharterFlowCore.py` SHA-256 `34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee` (unchanged).
+Portal: not submitted. This note is the 2026-10-14 walkthrough. Current source SHA-256 is `4b146292c840cf16e0dcfd7b8d488492092d73c2c3160dda366f922642eaee78` at `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`. The recovery source `34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee` remains on `0x408D…` only.
 
 ## Wallet types actually tested
 
@@ -15,6 +15,18 @@ Portal: not submitted. `contracts/CharterFlowCore.py` SHA-256 `34ea0e374cfe68788
 | Distinct addresses | Unit mocks `0x1111…` (creator/committee) and `0x2222…` (committee) plus recipient `0x3333…` and visitor `0x4444…` | Account change, chain change, role change. |
 
 No seed phrase or private key was requested or stored. Session flag is `localStorage cf_wallet_session_v1`. CLEAR SESSION does not silent-reconnect.
+
+## Async wallet-session gate (delayed RPC race)
+
+Startup restore (`eth_chainId` → `eth_accounts`), CONNECT (`eth_requestAccounts`), and balance reads snapshot an `AsyncWalletGate` (`epoch`, live session status, selected `rdns`, selected provider). After every await, the response is adopted only if the session is still the same connected provider.
+
+- CLEAR SESSION bumps `sessionEpochRef` and writes `status: 'cleared'`. A delayed `eth_accounts` cannot call `setAccount`.
+- CLEAR SESSION during in-flight CONNECT drops `eth_requestAccounts`. CONNECT snapshots `requireConnected: false` (status is still cleared until success); the epoch bump is what invalidates the promise.
+- Switching injected providers bumps epoch and selected provider identity. Provider A’s late CONNECT is dropped; provider B’s is adopted.
+- Restore and balance use `requireConnected: true`, so a cleared session cannot apply account or GEN balance.
+- `accountsChanged` / `chainChanged` ignore events whose provider is no longer the selected one.
+
+Helpers: `shouldAdoptAsyncWalletResult`, `adoptSettledWalletAccounts`, `firstAccountFromProviderAccounts` in `frontend/src/services/eip1193.ts`. Wired in `frontend/src/context/WalletContext.tsx`.
 
 ## Role / action matrix (UI guidance; contract is authoritative)
 
@@ -33,12 +45,12 @@ No seed phrase or private key was requested or stored. Session flag is `localSto
 
 | Suite | Result |
 |---|---|
-| `npm run test:wallet-steward` | 49 / 49 |
+| `npm run test:wallet-steward` | **66 / 66** (includes delayed-promise CLEAR-before-`eth_accounts`, CLEAR-during-CONNECT, provider switch A→B, undisturbed CONNECT, delayed balance after CLEAR) |
 | `npm run test:frontend-reads` | 91 / 91 |
 | `npm run test:frontend-writes` | 117 / 117 (includes expectedEffect + positive `messageFees` unblock) |
-| `npm run test:safety` | 71 / 71 |
-| `npm --prefix frontend run lint` | 0 errors (existing oxlint warnings) |
-| `npm --prefix frontend run build` | `tsc -b && vite build` OK, 6.9–9.6s |
+| `npm run test:safety` | 71 / 71 (not re-run this pass) |
+| `npm --prefix frontend run lint` | 21 warnings, **0 errors** |
+| `npm --prefix frontend run build` | `tsc -b && vite build` OK; bundle `dist/assets/index-DDv2FxNP.js` 1,275.03 kB |
 
 ## Localhost browser walkthrough
 

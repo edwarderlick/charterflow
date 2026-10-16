@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { NETWORK_CONFIG, VERIFIED_DEPLOYMENT } from '../config/network';
+import { NETWORK_CONFIG, VERIFIED_DEPLOYMENT, LEGACY_FUNDED_ROUND, NEXT_RUNNER_COMPAT_SOURCE, LEGACY_UNPATCHABLE_CONTRACT } from '../config/network';
 import { useWallet } from '../context/WalletContext';
 import { VerifiedDeploymentLinks } from '../components/VerifiedDeploymentLinks';
 import { STUDIO_NEXT_FAUCET } from '../services/eip1193';
@@ -67,7 +67,7 @@ export const TestCharterFlowPage: React.FC = () => {
               Explore rounds
             </Link>
             <Link
-              to={`/rounds/${VERIFIED_DEPLOYMENT.intendedRoundId}`}
+              to={`/rounds/${LEGACY_FUNDED_ROUND.pilotRoundId}`}
               className="px-3 py-2 bg-[#201f1f] text-[#e5e2e1] border border-[#2a2a2a] uppercase"
             >
               Recovery round (read only)
@@ -75,9 +75,12 @@ export const TestCharterFlowPage: React.FC = () => {
             <Link to="/how-it-works" className="px-3 py-2 bg-[#201f1f] text-[#e5e2e1] border border-[#2a2a2a] uppercase">
               How it works
             </Link>
+            <Link to="/deploy-corrected" className="px-3 py-2 bg-[#201f1f] text-[#e5e2e1] border border-[#2a2a2a] uppercase">
+              Deploy corrected core
+            </Link>
           </div>
           <p className="font-mono text-[11px] text-[#888884]">
-            Round {VERIFIED_DEPLOYMENT.intendedRoundId} is a locked recovery/refund case. Do not nominate into it. Stage 2 genesis readback is INCONCLUSIVE.
+            Round {LEGACY_FUNDED_ROUND.pilotRoundId} is a locked recovery/refund case on {LEGACY_FUNDED_ROUND.contractAddress}. Do not nominate into it. Stage 2 genesis readback is INCONCLUSIVE.
           </p>
         </div>
       </section>
@@ -171,7 +174,7 @@ export const TestCharterFlowPage: React.FC = () => {
                 <tr className="border-t border-[#2a2a2a]">
                   <td className="p-2 text-[#e5e2e1]">nominate_proposal</td>
                   <td className="p-2">Listed committee member</td>
-                  <td className="p-2">Blocked on recovery round {VERIFIED_DEPLOYMENT.intendedRoundId}</td>
+                  <td className="p-2">Blocked on recovery round {LEGACY_FUNDED_ROUND.pilotRoundId}</td>
                 </tr>
                 <tr className="border-t border-[#2a2a2a]">
                   <td className="p-2 text-[#e5e2e1]">evaluate_charter_fit</td>
@@ -210,7 +213,7 @@ export const TestCharterFlowPage: React.FC = () => {
           <VerifiedDeploymentLinks />
           <ul className="font-mono text-[11px] text-[#c8c6c2] space-y-1 list-disc pl-5">
             <li>
-              Source SHA-256 {VERIFIED_DEPLOYMENT.sourceSha256} must match <code>contracts/CharterFlowCore.py</code>
+              Verified contract {VERIFIED_DEPLOYMENT.contractAddress} runs source {VERIFIED_DEPLOYMENT.sourceSha256} (deploy {VERIFIED_DEPLOYMENT.deployTransaction}). Do not deploy that source again. Legacy contract {LEGACY_UNPATCHABLE_CONTRACT.contractAddress} still runs {NEXT_RUNNER_COMPAT_SOURCE.unpatchableLiveSourceSha256} and cannot be patched. AI review and voting stay closed there. Its funded rounds stay visible for recovery.
             </li>
             <li>
               Public evidence: <code>docs/PUBLIC_EVIDENCE.md</code>
@@ -229,7 +232,7 @@ export const TestCharterFlowPage: React.FC = () => {
               <code className="font-mono text-[#ffb596]">-32603</code> (rollback). Live round ledgers cannot be proven from that path until GenLayer restores reads.
             </li>
             <li>
-              Stage 2 for {VERIFIED_DEPLOYMENT.intendedRoundId} remains INCONCLUSIVE. A finalized create_round receipt is not round-state proof.
+              Stage 2 for {LEGACY_FUNDED_ROUND.pilotRoundId} on the legacy contract remains INCONCLUSIVE. A finalized create_round receipt is not round-state proof.
             </li>
             <li>Do not treat DESIGN PREVIEW fixtures as chain evidence.</li>
             <li>No public Vercel origin is claimed until one is deployed after a localhost review.</li>

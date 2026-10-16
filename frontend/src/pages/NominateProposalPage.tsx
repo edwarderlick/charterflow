@@ -2,11 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useData, parseGenToWei } from '../services/dataAccess';
 import { useWallet } from '../context/WalletContext';
-import {
-  prepareActionTransaction,
-  type PreparedTransaction,
-} from '../services/transactionService';
+import { prepareActionTransaction } from '../services/transactionService';
 import { TransactionModal } from '../components/TransactionModal';
+import { useTxModalResume } from '../services/txModalSnapshot';
 import { canNominate } from '../services/permissions';
 import type { Round, ProposalDraft } from '../types';
 
@@ -23,7 +21,7 @@ export const NominateProposalPage: React.FC = () => {
 
   // Form Fields - clean default values without fabricated data
   const [recipientAddress, setRecipientAddress] = useState('');
-  const [requestedAmount, setRequestedAmount] = useState<number>(0);
+  const [requestedAmountInput, setRequestedAmountInput] = useState('');
   const [selectedDirective, setSelectedDirective] = useState<string>('');
   const [workDescription, setWorkDescription] = useState('');
   const [deliverablesText, setDeliverablesText] = useState('');
@@ -35,8 +33,7 @@ export const NominateProposalPage: React.FC = () => {
   // Step Wizard & Transaction State
   const [wizardStep, setWizardStep] = useState<number>(1);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
-  const [preparedTx, setPreparedTx] = useState<PreparedTransaction | null>(null);
-  const [showTxModal, setShowTxModal] = useState<boolean>(false);
+  const { preparedTx, setPreparedTx, showTxModal, setShowTxModal, closeTxModal, initialSnapshot } = useTxModalResume();
   const [isPreparingTx, setIsPreparingTx] = useState<boolean>(false);
   const [txError, setTxError] = useState<string | null>(null);
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
@@ -81,7 +78,11 @@ export const NominateProposalPage: React.FC = () => {
   const handleRestoreDraft = () => {
     if (!savedDraft) return;
     setRecipientAddress(savedDraft.recipientAddress || '');
-    setRequestedAmount(savedDraft.requestedGen || 0);
+    setRequestedAmountInput(
+      savedDraft.requestedGen != null && savedDraft.requestedGen > 0
+        ? String(savedDraft.requestedGen)
+        : ''
+    );
     setSelectedDirective(savedDraft.primaryDirectiveId || (round?.charterRules[0]?.id ?? ''));
     setWorkDescription(savedDraft.workDescription || '');
     setDeliverablesText(savedDraft.deliverablesText || '');
@@ -170,8 +171,11 @@ export const NominateProposalPage: React.FC = () => {
   const isDistinctFromNominator =
     !account || recipientAddress.trim().toLowerCase() !== nominatorAddress.toLowerCase();
 
-  // Allocation validation: requested amount <= both round cap and available treasury
+  // Positive decimal GEN. Contract still enforces wei > 0 and wei <= grant_cap.
+  const requestedAmount = Number(requestedAmountInput);
+  const isAmountFormatValid = /^(?:\d+\.?\d*|\.\d+)$/.test(requestedAmountInput.trim());
   const isAmountValid =
+    isAmountFormatValid &&
     Number.isFinite(requestedAmount) &&
     requestedAmount > 0 &&
     requestedAmount <= maxCap &&
@@ -216,7 +220,7 @@ export const NominateProposalPage: React.FC = () => {
     const draft: ProposalDraft = {
       roundId,
       recipientAddress,
-      requestedGen: requestedAmount,
+      requestedGen: isAmountValid ? requestedAmount : 0,
       primaryDirectiveId: selectedDirective,
       workDescription,
       deliverablesText,
@@ -254,7 +258,7 @@ export const NominateProposalPage: React.FC = () => {
     setIsPreparingTx(true);
     setTxError(null);
     try {
-      const requestedAmountWei = parseGenToWei(String(requestedAmount), {
+      const requestedAmountWei = parseGenToWei(requestedAmountInput.trim(), {
         context: 'Requested Amount',
       });
 
@@ -284,7 +288,7 @@ export const NominateProposalPage: React.FC = () => {
   };
 
   const handleLockMax = () => {
-    setRequestedAmount(Math.min(maxCap, availableTreasury));
+    setRequestedAmountInput(String(Math.min(maxCap, availableTreasury)));
   };
 
   return (
@@ -484,12 +488,16 @@ export const NominateProposalPage: React.FC = () => {
                     </div>
                     <div className="flex items-center bg-[#0e0e0e] border border-[#2a2a2a]">
                       <input
-                        type="number"
-                        value={requestedAmount || ''}
-                        onChange={(e) => setRequestedAmount(Number(e.target.value))}
-                        min="1"
-                        max={Math.min(maxCap, availableTreasury)}
-                        placeholder="0"
+                        type="text"
+                        inputMode="decimal"
+                        value={requestedAmountInput}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
+                            setRequestedAmountInput(raw);
+                          }
+                        }}
+                        placeholder="0.05"
                         className="w-full bg-transparent p-3 text-lg font-mono font-bold text-[#e5e2e1] focus:outline-none"
                       />
                       <span className="px-3 font-mono text-xs text-[#ff5719] font-bold">TEST GEN</span>
@@ -820,7 +828,8 @@ export const NominateProposalPage: React.FC = () => {
       {/* Transaction Review & Tracking Modal */}
       <TransactionModal
         isOpen={showTxModal}
-        onClose={() => setShowTxModal(false)}
+        onClose={closeTxModal}
+        initialSnapshot={initialSnapshot}
         prepared={preparedTx}
         provider={provider}
         account={account || ''}

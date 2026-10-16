@@ -1,12 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useData } from '../services/dataAccess';
 import { useWallet } from '../context/WalletContext';
-import {
-  prepareActionTransaction,
-  type PreparedTransaction,
-} from '../services/transactionService';
+import { prepareActionTransaction, recordedActionBlocksResubmit } from '../services/transactionService';
 import { TransactionModal } from '../components/TransactionModal';
+import { useTxModalResume } from '../services/txModalSnapshot';
 import type { Proposal, Round } from '../types';
 import { CopyButton } from '../components/CopyButton';
 import { Barcode } from '../components/Barcode';
@@ -28,21 +26,30 @@ export const ProposalDetailPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [modalFeedback, setModalFeedback] = useState<string | null>(null);
   const [showVoteModal, setShowVoteModal] = useState<'YES' | 'NO' | null>(null);
-  const [preparedTx, setPreparedTx] = useState<PreparedTransaction | null>(null);
-  const [showTxModal, setShowTxModal] = useState<boolean>(false);
+  const { preparedTx, setPreparedTx, showTxModal, setShowTxModal, closeTxModal, initialSnapshot } = useTxModalResume();
   const [isPreparingTx, setIsPreparingTx] = useState<boolean>(false);
   const [txError, setTxError] = useState<string | null>(null);
+  const hasProposal = useRef(false);
+
+  useEffect(() => {
+    hasProposal.current = false;
+    setProposal(null);
+    setRound(null);
+    setLoading(true);
+    setError(null);
+  }, [id]);
 
   useEffect(() => {
     let mounted = true;
     const proposalId = id || '';
-    setLoading(true);
+    if (!hasProposal.current) setLoading(true);
     setError(null);
     adapter
       .getProposalById(proposalId)
       .then(async (p) => {
         if (!mounted) return;
         if (p) {
+          hasProposal.current = true;
           setProposal(p);
           try {
             const r = await adapter.getRoundById(p.roundId);
@@ -67,7 +74,7 @@ export const ProposalDetailPage: React.FC = () => {
     };
   }, [id, adapter, refreshKey]);
 
-  if (loading) {
+  if (loading && !proposal) {
     return (
       <div className="flex-1 flex items-center justify-center p-20 font-mono text-xs text-[#888884] bg-[#131313]">
         RETRIEVING PROPOSAL SPECIFICATION ON CHAIN 61997...
@@ -75,7 +82,7 @@ export const ProposalDetailPage: React.FC = () => {
     );
   }
 
-  if (error) {
+  if (error && !proposal) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-20 space-y-4 bg-[#131313] text-center font-mono">
         <div className="p-4 bg-[#201f1f] border border-[#ff3344]/30">
@@ -186,11 +193,16 @@ export const ProposalDetailPage: React.FC = () => {
     proposal,
     hasAlreadyVoted,
   });
+  const blockingEvaluate = recordedActionBlocksResubmit('evaluate_charter_fit', proposal.id);
+  const blockingVote = recordedActionBlocksResubmit('cast_vote', proposal.id);
+  const blockingWithdraw = recordedActionBlocksResubmit('withdraw_credit', proposal.id);
   const evaluateDecision = canEvaluateCharterFit({
     proposal,
     connected: isConnected,
     correctChain: isCorrectNetwork,
   });
+  const legacyWriteBlocked =
+    evaluateDecision.reason.startsWith('WRITE BLOCKED') || voteDecision.reason.startsWith('WRITE BLOCKED');
   const withdrawDecision = canWithdrawCredit({
     connected: isConnected,
     correctChain: isCorrectNetwork,
@@ -222,6 +234,13 @@ export const ProposalDetailPage: React.FC = () => {
     }
     if (!proposal) {
       setTxError('Proposal data not loaded.');
+      return;
+    }
+    const blockingVote = recordedActionBlocksResubmit('cast_vote', proposal.id);
+    if (blockingVote) {
+      setTxError(
+        `Vote already recorded${blockingVote.txId ? `: ${blockingVote.txId}` : ''}. Read-only reconciliation is required. It cannot be submitted again.`
+      );
       return;
     }
     setIsPreparingTx(true);
@@ -270,6 +289,13 @@ export const ProposalDetailPage: React.FC = () => {
       setTxError('Proposal data not loaded.');
       return;
     }
+    const blockingEvaluate = recordedActionBlocksResubmit('evaluate_charter_fit', proposal.id);
+    if (blockingEvaluate) {
+      setTxError(
+        `Evaluation already recorded${blockingEvaluate.txId ? `: ${blockingEvaluate.txId}` : ''}. Read-only reconciliation is required. It cannot be submitted again.`
+      );
+      return;
+    }
     setIsPreparingTx(true);
     setTxError(null);
     try {
@@ -309,6 +335,13 @@ export const ProposalDetailPage: React.FC = () => {
     }
     if (!proposal) {
       setTxError('Proposal data not loaded.');
+      return;
+    }
+    const blockingWithdraw = recordedActionBlocksResubmit('withdraw_credit', proposal.id);
+    if (blockingWithdraw) {
+      setTxError(
+        `Withdrawal already recorded${blockingWithdraw.txId ? `: ${blockingWithdraw.txId}` : ''}. Read-only reconciliation is required. It cannot be submitted again.`
+      );
       return;
     }
     setIsPreparingTx(true);
@@ -421,7 +454,7 @@ export const ProposalDetailPage: React.FC = () => {
                 proposal.status === 'ELIGIBLE' ? 'bg-[#ffb800]' : 'bg-[#ffb800]'
               }`}
             ></span>
-            <span className="font-bold uppercase text-[#ffb800]">
+            <span className="font-bold uppercase text-[#ffb800]" data-testid="proposal-state">
               STATE: {proposal.status} // {proposal.status === 'ELIGIBLE' || proposal.status === 'VOTING' ? 'VOTING IN PROGRESS' : proposal.status === 'APPROVED' ? 'CONSENSUS RATIFIED' : proposal.status === 'SUBMITTED' ? 'EVALUATION PENDING' : proposal.status === 'PAYOUT_EMITTED' ? 'PAYOUT EMITTED (CREDIT WITHDRAWN)' : proposal.status === 'NEEDS_CLARITY' ? 'NEEDS CLARITY (EVALUATION INCONCLUSIVE)' : proposal.status === 'EXPIRED' ? 'SUBMISSION EXPIRED' : 'VOTING CLOSED'}
             </span>
           </div>
@@ -639,7 +672,7 @@ export const ProposalDetailPage: React.FC = () => {
                     <span className="material-symbols-outlined text-[#ff5719] text-[16px]">psychology</span>
                     <span>GENLAYER VALIDATOR INTELLIGENCE EVALUATION</span>
                   </div>
-                  <span className="px-2 py-0.5 bg-[#00e599]/20 text-[#00e599] font-bold uppercase">
+                  <span className="px-2 py-0.5 bg-[#00e599]/20 text-[#00e599] font-bold uppercase" data-testid="proposal-verdict">
                     EVALUATION: {proposal.aiEvaluation.status} {proposal.aiEvaluation.score != null ? `(${proposal.aiEvaluation.score}%)` : '(SCORE UNAVAILABLE - ON-CHAIN VERDICT ONLY)'}
                   </span>
                 </div>
@@ -765,6 +798,12 @@ export const ProposalDetailPage: React.FC = () => {
               </div>
 
               {!isConnected ? (
+                legacyWriteBlocked ? (
+                <div data-testid="legacy-write-block" className="p-3 bg-[#ff3344]/10 border border-[#ff3344] text-[#ffb596] text-[11px] space-y-1">
+                  <div className="font-bold uppercase">WRITE BLOCKED</div>
+                  <p>{evaluateDecision.reason}</p>
+                </div>
+                ) : (
                 <div className="p-4 bg-[#0e0e0e] border border-[#2a2a2a] space-y-3">
                   <div className="text-[#888884] flex items-center gap-2">
                     <span className="material-symbols-outlined text-[16px]">account_balance_wallet</span>
@@ -781,6 +820,7 @@ export const ProposalDetailPage: React.FC = () => {
                     CONNECT WALLET
                   </button>
                 </div>
+                )
               ) : !isMember ? (
                 <div className="p-3 bg-[#0e0e0e] border border-[#2a2a2a] text-[11px] text-[#888884] space-y-1">
                   <div className="text-[#ffb800] font-bold flex items-center gap-1.5">
@@ -790,6 +830,11 @@ export const ProposalDetailPage: React.FC = () => {
                   <p>
                     Connected account <span className="text-[#e5e2e1]">{account?.slice(0, 6)}...{account?.slice(-4)}</span> is not on the registered voter list for Round #{proposal.roundId.toUpperCase()}.
                   </p>
+                </div>
+              ) : legacyWriteBlocked ? (
+                <div data-testid="legacy-write-block" className="p-3 bg-[#ff3344]/10 border border-[#ff3344] text-[#ffb596] text-[11px] space-y-1">
+                  <div className="font-bold">WRITE BLOCKED</div>
+                  <p>{voteDecision.reason}</p>
                 </div>
               ) : !isVotingWindowOpen ? (
                 <div className="p-3 bg-[#0e0e0e] border border-[#2a2a2a] text-[11px] text-[#888884] space-y-1">
@@ -832,6 +877,11 @@ export const ProposalDetailPage: React.FC = () => {
                       <p>
                         Your wallet participation has been securely logged into contract storage. Duplicate ballots are prevented by protocol logic.
                       </p>
+                    </div>
+                  ) : blockingVote ? (
+                    <div className="p-3 bg-[#ffb800]/10 border border-[#ffb800] text-[#ffb800] text-[11px] space-y-1" data-testid="tx-reconcile-only">
+                      <div className="font-bold">VOTE ALREADY RECORDED</div>
+                      <p className="break-all">Read-only reconciliation is required. This vote cannot be submitted again. {blockingVote.txId}</p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-3 pt-1">
@@ -882,7 +932,13 @@ export const ProposalDetailPage: React.FC = () => {
               )}
 
               {/* Permissionless AI Charter Review Trigger */}
-              {proposal.status === 'SUBMITTED' && (
+              {legacyWriteBlocked && (
+                <div data-testid="legacy-write-block" className="p-3 bg-[#ff3344]/10 border border-[#ff3344] text-[#ffb596] text-[11px] space-y-1 mt-3">
+                  <div className="font-bold uppercase">WRITE BLOCKED</div>
+                  <p>{evaluateDecision.reason}</p>
+                </div>
+              )}
+              {proposal.status === 'SUBMITTED' && !legacyWriteBlocked && !blockingEvaluate && (
                 <div className="p-3 bg-[#0e0e0e] border border-[#ff5719] space-y-2 mt-3">
                   <div className="flex justify-between items-center text-[10px] text-[#ff5719] font-bold uppercase">
                     <span>STAGE 02 // ACTIONABLE</span>
@@ -891,6 +947,7 @@ export const ProposalDetailPage: React.FC = () => {
                   <p className="text-[#c8c6c2] text-[11px]">{evaluateDecision.reason}</p>
                   <button
                     type="button"
+                    data-testid="trigger-ai-evaluation"
                     disabled={isPreparingTx || !evaluateDecision.allowed}
                     title={evaluateDecision.reason}
                     onClick={handleInitiateEvaluate}
@@ -898,6 +955,12 @@ export const ProposalDetailPage: React.FC = () => {
                   >
                     {isPreparingTx ? 'PREPARING REVIEW...' : 'TRIGGER AI CHARTER EVALUATION ↗'}
                   </button>
+                </div>
+              )}
+              {blockingEvaluate && (
+                <div className="p-3 bg-[#ffb800]/10 border border-[#ffb800] text-[#ffb800] text-[11px] space-y-1 mt-3" data-testid="tx-reconcile-only">
+                  <div className="font-bold uppercase">EVALUATION ALREADY RECORDED</div>
+                  <p className="break-all">Read-only reconciliation is required. This evaluation cannot be submitted again. {blockingEvaluate.txId}</p>
                 </div>
               )}
 
@@ -951,15 +1014,23 @@ export const ProposalDetailPage: React.FC = () => {
                   <p className="text-[#c8c6c2]">
                     {proposal.requestedGen.toLocaleString()} test GEN allocated. Execute pull-payout:
                   </p>
-                  <button
-                    type="button"
-                    disabled={isPreparingTx || !withdrawDecision.allowed}
-                    title={withdrawDecision.reason}
-                    onClick={handleInitiateWithdraw}
-                    className="w-full py-2.5 bg-[#00e599] text-black font-bold uppercase hover:bg-white transition-colors cursor-pointer disabled:bg-[#201f1f] disabled:text-[#888884]"
-                  >
-                    {isPreparingTx ? 'PREPARING WITHDRAWAL...' : 'WITHDRAW GRANT ALLOCATION ↗'}
-                  </button>
+                  {blockingWithdraw ? (
+                    <div className="p-2 bg-[#ffb800]/10 border border-[#ffb800] text-[#ffb800] space-y-1" data-testid="withdraw-reconcile-only">
+                      <div className="font-bold uppercase">WITHDRAWAL ALREADY RECORDED</div>
+                      <p className="break-all">Read-only reconciliation is required. This withdrawal cannot be submitted again. {blockingWithdraw.txId}</p>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      data-testid="trigger-withdraw-credit"
+                      disabled={isPreparingTx || !withdrawDecision.allowed}
+                      title={withdrawDecision.reason}
+                      onClick={handleInitiateWithdraw}
+                      className="w-full py-2.5 bg-[#00e599] text-black font-bold uppercase hover:bg-white transition-colors cursor-pointer disabled:bg-[#201f1f] disabled:text-[#888884]"
+                    >
+                      {isPreparingTx ? 'PREPARING WITHDRAWAL...' : 'WITHDRAW GRANT ALLOCATION ↗'}
+                    </button>
+                  )}
                   <p className="text-[10px] text-[#888884]">{withdrawDecision.reason}</p>
                 </div>
               )}
@@ -1122,7 +1193,8 @@ export const ProposalDetailPage: React.FC = () => {
       {/* Transaction Review & Tracking Modal */}
       <TransactionModal
         isOpen={showTxModal}
-        onClose={() => setShowTxModal(false)}
+        onClose={closeTxModal}
+        initialSnapshot={initialSnapshot}
         prepared={preparedTx}
         provider={provider}
         account={account || ''}

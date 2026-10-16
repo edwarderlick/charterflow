@@ -1,11 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useData } from '../services/dataAccess';
 import { useWallet } from '../context/WalletContext';
 import type { Round } from '../types';
-import { NETWORK_CONFIG, isContractConfigured, VERIFIED_DEPLOYMENT } from '../config/network';
+import { NETWORK_CONFIG, isContractConfigured, isLockedRecoveryRound } from '../config/network';
 import { VerifiedDeploymentLinks } from '../components/VerifiedDeploymentLinks';
 import { canNominate } from '../services/permissions';
+import { createRoundTxHash } from '../services/reconciledCreateRounds';
+import { commitDraftsForVerifiedRounds, firstUncommittedRoundDraft, readRoundDraftInventory } from '../services/roundDraft';
+import {
+  countOpenRounds,
+  exploreRoundStatusClass,
+  exploreRoundStatusLabel,
+  roundMatchesExploreTab,
+} from '../services/exploreRoundStatus';
 
 
 export const ExploreRoundsPage: React.FC = () => {
@@ -19,6 +27,21 @@ export const ExploreRoundsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'RECENT' | 'POOL_HIGH' | 'CAP_HIGH'>('RECENT');
   const [onlyEligible, setOnlyEligible] = useState(false);
+  const [draftRevision, setDraftRevision] = useState(0);
+  const draftInventory = useMemo(
+    () => (typeof window === 'undefined' ? { preview: null, live: null, working: null } : readRoundDraftInventory(window.localStorage)),
+    [draftRevision]
+  );
+  const visibleDraft = firstUncommittedRoundDraft(draftInventory);
+
+  useEffect(() => {
+    if (isDesignPreview || loading || error || typeof window === 'undefined') return;
+    const result = commitDraftsForVerifiedRounds(
+      window.localStorage,
+      rounds.map((round) => ({ id: round.id, title: round.title }))
+    );
+    if (result.committedStores.length > 0) setDraftRevision((value) => value + 1);
+  }, [isDesignPreview, loading, error, rounds]);
 
   useEffect(() => {
     let mounted = true;
@@ -46,16 +69,13 @@ export const ExploreRoundsPage: React.FC = () => {
   // Aggregate stats
   const totalLockedGen = rounds.reduce((sum, r) => sum + r.totalPoolGen, 0);
   const totalInReviewGen = rounds.reduce((sum, r) => sum + r.reservedGen, 0);
-  const activeRoundsCount = rounds.filter((r) => r.status === 'ACTIVE' || r.status === 'ACTIVE_VOTING').length;
+  const activeRoundsCount = countOpenRounds(rounds);
+  const closedRoundsCount = rounds.filter((r) => roundMatchesExploreTab(r.status, 'CLOSED')).length;
+  const complianceRoundsCount = rounds.filter((r) => roundMatchesExploreTab(r.status, 'COMPLIANCE')).length;
 
   // Filter logic
   const filteredRounds = rounds
-    .filter((r) => {
-      if (activeTab === 'ACTIVE') return r.status === 'ACTIVE' || r.status === 'ACTIVE_VOTING';
-      if (activeTab === 'CLOSED') return r.status === 'CLOSED' || r.status === 'FINALIZED' || r.status === 'REFUND_EMITTED';
-      if (activeTab === 'COMPLIANCE') return r.status === 'COMPLIANCE';
-      return true;
-    })
+    .filter((r) => roundMatchesExploreTab(r.status, activeTab))
     .filter((r) => {
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
@@ -186,7 +206,7 @@ export const ExploreRoundsPage: React.FC = () => {
                     : 'bg-[#201f1f] text-[#c8c6c2] hover:text-white'
                 }`}
               >
-                Active / Voting Open ({loading || error ? '--' : rounds.filter((r) => r.status === 'ACTIVE_VOTING').length})
+                Active / Voting Open ({loading || error ? '--' : activeRoundsCount})
               </button>
               <button
                 type="button"
@@ -197,7 +217,7 @@ export const ExploreRoundsPage: React.FC = () => {
                     : 'bg-[#201f1f] text-[#c8c6c2] hover:text-white'
                 }`}
               >
-                Finalized / Closed ({loading || error ? '--' : rounds.filter((r) => r.status === 'FINALIZED').length})
+                Finalized / Closed ({loading || error ? '--' : closedRoundsCount})
               </button>
               <button
                 type="button"
@@ -208,7 +228,7 @@ export const ExploreRoundsPage: React.FC = () => {
                     : 'bg-[#201f1f] text-[#c8c6c2] hover:text-white'
                 }`}
               >
-                Compliance Stage ({loading || error ? '--' : rounds.filter((r) => r.status === 'COMPLIANCE').length})
+                Compliance Stage ({loading || error ? '--' : complianceRoundsCount})
               </button>
             </div>
 
@@ -258,22 +278,20 @@ export const ExploreRoundsPage: React.FC = () => {
       </section>      {/* Rounds Grid / Truthful Empty State */}
       <section className="w-full px-4 lg:px-10 py-10">
         <div className="max-w-7xl mx-auto">
-          {/* Findable Local Draft Display */}
-          {adapter.getRoundDraft() && (
+          {/* Findable Local Draft Display — never presented as an on-chain round */}
+          {visibleDraft && (
             <div className="mb-8 p-5 bg-[#1c1b1b] border border-[#ff5719] font-mono text-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 bg-[#ff5719] text-[#521300] font-bold uppercase">
-                    LOCAL DRAFT
+                    LOCAL DRAFT · NOT ON-CHAIN
                   </span>
                   <span className="text-[#e5e2e1] font-bold text-sm">
-                    {adapter.getRoundDraft()?.title || 'Untitled Round Draft'}
+                    {visibleDraft.title || 'Untitled Round Draft'}
                   </span>
                 </div>
                 <p className="text-[#888884] text-[11px]">
-                  Uncommitted genesis specification saved in local browser storage. Cap:{' '}
-                  {adapter.getRoundDraft()?.capPerProposalGen?.toLocaleString() || 5000} GEN · Deposit:{' '}
-                  {adapter.getRoundDraft()?.initialDepositGen?.toLocaleString() || 50000} GEN
+                  Uncommitted genesis specification in browser storage (cf_round_draft_preview / cf_round_draft_live). This is not a created round.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -281,7 +299,7 @@ export const ExploreRoundsPage: React.FC = () => {
                   to="/rounds/new"
                   className="px-5 py-2.5 bg-[#ff5719] text-[#521300] font-bold uppercase hover:bg-white hover:text-black transition-colors"
                 >
-                  EDIT LOCAL DRAFT ↗
+                  RESTORE LOCAL DRAFT ↗
                 </Link>
               </div>
             </div>
@@ -397,23 +415,13 @@ export const ExploreRoundsPage: React.FC = () => {
                             ROUND #{round.id.toUpperCase()} · CHAIN 61997
                           </span>
                           <span className="text-[10px] px-1.5 py-0.5 bg-[#262626] text-[#888884] uppercase">
-                            {isDesignPreview ? 'PREVIEW RECORD' : 'ON-CHAIN STATE'}
+                            {round.legacyRecovery ? 'LEGACY RECOVERY' : isDesignPreview ? 'PREVIEW RECORD' : 'ON-CHAIN STATE'}
                           </span>
                         </div>
                         <span
-                          className={`px-2.5 py-0.5 text-[10px] font-bold uppercase ${
-                            round.status === 'ACTIVE_VOTING'
-                              ? 'bg-[#00e599]/20 text-[#00e599]'
-                              : round.status === 'COMPLIANCE'
-                              ? 'bg-[#ffb800]/20 text-[#ffb800]'
-                              : 'bg-[#353534] text-[#c8c6c2]'
-                          }`}
+                          className={`px-2.5 py-0.5 text-[10px] font-bold uppercase ${exploreRoundStatusClass(round.status)}`}
                         >
-                          {round.status === 'ACTIVE_VOTING'
-                            ? 'VOTING OPEN'
-                            : round.status === 'COMPLIANCE'
-                            ? 'COMPLIANCE STAGE'
-                            : 'FINALIZED / SETTLED'}
+                          {exploreRoundStatusLabel(round.status)}
                         </span>
                       </div>
 
@@ -422,7 +430,21 @@ export const ExploreRoundsPage: React.FC = () => {
                         <h2 className="font-['Space_Grotesk'] text-xl uppercase font-bold text-[#e5e2e1] leading-snug">
                           {round.title}
                         </h2>
+                        {(() => {
+                          const tx = createRoundTxHash(round.id);
+                          if (!tx) return null;
+                          return (
+                            <p className="mt-2 font-mono text-[11px] break-all text-[#e5e2e1]" data-testid="round-tx-hash">
+                              TX {tx.hash}
+                            </p>
+                          );
+                        })()}
                         <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-[#888884] mt-2">
+                          {round.legacyRecovery && (
+                            <span className="text-[#ffb800] break-all">
+                              LEGACY CONTRACT {round.contractAddress} · AI REVIEW AND VOTING CLOSED
+                            </span>
+                          )}
                           <span>CREATOR: {round.creatorAddress.slice(0, 6)}...{round.creatorAddress.slice(-4)}</span>
                           <span>|</span>
                           <span>DEADLINE: {round.deadlineDisplay}</span>
@@ -497,7 +519,7 @@ export const ExploreRoundsPage: React.FC = () => {
                             round,
                             account,
                           });
-                          const isRecovery = round.id.toLowerCase() === VERIFIED_DEPLOYMENT.intendedRoundId.toLowerCase();
+                          const isRecovery = isLockedRecoveryRound(round.id);
                           return (
                             <Link
                               to={`/rounds/${round.id}/nominate`}
@@ -564,15 +586,15 @@ export const ExploreRoundsPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-[#141414] border border-[#222222] p-4 space-y-1">
               <span className="text-[#888884] block text-[10px]">DEPLOYMENT</span>
-              <p className="text-[#e5e2e1] text-[11px]">CharterFlowCore is configured at 0x408DcC...96ba21 on chain 61997.</p>
+              <p className="text-[#e5e2e1] text-[11px]">CharterFlowCore is configured at {NETWORK_CONFIG.contractAddress.slice(0, 8)}...{NETWORK_CONFIG.contractAddress.slice(-6)} on chain 61997.</p>
             </div>
             <div className="bg-[#141414] border border-[#222222] p-4 space-y-1">
-              <span className="text-[#888884] block text-[10px]">STAGE 2 READBACK</span>
-              <p className="text-[#ffb800] text-[11px]">Round rnd-pilot-354517 remains unverified until full state and balance reconciliation succeeds.</p>
+              <span className="text-[#888884] block text-[10px]">RECOVERY ROUNDS</span>
+              <p className="text-[#ffb800] text-[11px]">rnd-pilot-354517 and round-studio-next-rpc--mv9pwatt remain on 0x408D… as locked recovery cases.</p>
             </div>
             <div className="bg-[#141414] border border-[#222222] p-4 space-y-1">
-              <span className="text-[#888884] block text-[10px]">CHAIN SAFETY GATE</span>
-              <p className="text-[#e5e2e1] text-[11px]">No later pilot write is authorized while Stage 2 readback is unresolved.</p>
+              <span className="text-[#888884] block text-[10px]">LIVE REGISTRY</span>
+              <p className="text-[#e5e2e1] text-[11px]">The corrected contract starts with zero rounds. New create_round calls target this address only.</p>
             </div>
           </div>
           )}

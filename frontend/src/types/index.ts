@@ -45,6 +45,7 @@ export interface ProposalEvent {
 export interface Proposal {
   id: string;
   roundId: string;
+  contractAddress?: string;
   roundTitle: string;
   title: string;
   requestedGen: number;
@@ -97,6 +98,8 @@ export interface Round {
   summary: string;
   creatorAddress: string;
   contractAddress?: string;
+  /** Funded round that remains on the unpatchable 0x9579 contract for recovery. */
+  legacyRecovery?: boolean;
   status: RoundState;
   totalPoolGen: number;
   availableGen: number;
@@ -106,6 +109,7 @@ export interface Round {
   capPerProposalGen: number;
   deadlineDisplay: string;
   nominationCutoffUnix?: number;
+  votingDurationSec?: number;
   roundEndUnix?: number;
   consensusThresholdPercent: number;
   requiredVotes: number;
@@ -144,6 +148,10 @@ export interface RoundDraft {
   votingWindowDays: number;
   initialDepositGen: number;
   savedAt: string;
+  rosterRaw?: string;
+  plannedRecipient?: string;
+  ratified?: boolean;
+  currentStep?: number;
 }
 
 export interface ProposalDraft {

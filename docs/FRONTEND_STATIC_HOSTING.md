@@ -10,7 +10,7 @@ Vite inlines `VITE_*` at build time. Defaults in `frontend/src/config/network.ts
 |---|---|
 | `VITE_RPC_URL` | `https://studio-next.genlayer.com/api` |
 | `VITE_EXPLORER_URL` | `https://explorer-studio-dev.genlayer.com` |
-| `VITE_CONTRACT_ADDRESS` | `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21` |
+| `VITE_CONTRACT_ADDRESS` | `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8` |
 
 Never put private keys in `VITE_*`. Copy `frontend/.env.example` to `frontend/.env` locally if needed.
 
@@ -28,17 +28,17 @@ Output: `frontend/dist/` (gitignored).
 The app uses `BrowserRouter` with routes such as `/rounds/:id` and `/proposals/:id`. The static host must serve `index.html` for unknown paths.
 
 - Netlify: `frontend/public/_redirects` contains `/*    /index.html   200` and is copied into `dist/`.
-- Vercel: `frontend/vercel.json` rewrites `/(.*)` to `/index.html`. Set the Vercel **Root Directory** to `frontend`. Public env (optional; defaults already match Studio Next):
+- Vercel: `frontend/vercel.json` rewrites `/(.*)` to `/index.html`. Set the Vercel **Root Directory** to `frontend`. Install `npm ci`, build `npm run build`, output `dist`. Public env (optional; the source defaults already match):
   - `VITE_RPC_URL=https://studio-next.genlayer.com/api`
   - `VITE_EXPLORER_URL=https://explorer-studio-dev.genlayer.com`
-  - `VITE_CONTRACT_ADDRESS=0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`
+  - `VITE_CONTRACT_ADDRESS=0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`
 - Cloudflare Pages / nginx: equivalent SPA fallback to `index.html`.
 - GitHub Pages project sites also need Vite `base` set to the repo subpath.
 
-Do not deploy until a local live walkthrough has been accepted.
+These settings are what a Git-connected Vercel project needs. This repository does not deploy itself.
 
 ## Honest live errors and preview isolation
 
 The hosted app must keep default **live** mode. Failed Studio Next `gen_call` reads must show the RPC error (including `-32603` rollback). They must not render as an empty chain or as verified rounds. Design-preview fixtures stay behind an explicit **PREVIEW DATA** toggle and `DESIGN PREVIEW` / `PREVIEW RECORD` labels (`frontend/src/components/DesignPreviewBanner.tsx`, `docs/BROWSER_SMOKE_2026-10-14.md`).
 
-`VERIFIED_DEPLOYMENT.stage2ReadbackVerified` remains `false` until the exact genesis verifier passes on real chain reads.
+`VERIFIED_DEPLOYMENT.stage2ReadbackVerified` is still `false` in source and is not what the README uses as evidence. The verified round is documented in `docs/evidence/verified-flow.json`.

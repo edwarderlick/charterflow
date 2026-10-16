@@ -17,7 +17,30 @@ import {
 
 import { createClient } from 'genlayer-js';
 import { studioDevnet } from 'genlayer-js/chains';
-import { NETWORK_CONFIG, isContractConfigured } from '../config/network';
+import { TransactionHashVariant } from 'genlayer-js/types';
+import {
+  NETWORK_CONFIG,
+  isContractConfigured,
+  LEGACY_FUNDED_ROUND,
+  LEGACY_UNPATCHABLE_CONTRACT,
+  VERIFIED_DEPLOYMENT,
+  isLockedRecoveryRound,
+  isLegacyUnpatchableRound,
+} from '../config/network';
+import {
+  ROUND_DRAFT_LIVE_KEY,
+  ROUND_DRAFT_PREVIEW_KEY,
+  parseRoundDraft,
+  saveRoundDraftToStore,
+  type StoredRoundDraft,
+} from './roundDraft';
+
+export interface ContractViewHealth {
+  ok: boolean;
+  method: string;
+  diagnostic: string;
+  code?: number | string;
+}
 
 export interface DataAccessAdapter {
   isLive: boolean;
@@ -32,6 +55,7 @@ export interface DataAccessAdapter {
   saveProposalDraft(draft: ProposalDraft): void;
   getProposalDraft(roundId: string): ProposalDraft | null;
   clearProposalDraft(roundId: string): void;
+  probeContractViewHealth(): Promise<ContractViewHealth>;
 }
 
 class PreviewDataAccessAdapter implements DataAccessAdapter {
@@ -60,16 +84,23 @@ class PreviewDataAccessAdapter implements DataAccessAdapter {
   }
 
   saveRoundDraft(draft: RoundDraft): void {
-    localStorage.setItem('cf_round_draft_preview', JSON.stringify(draft));
+    saveRoundDraftToStore(localStorage, 'preview', draft as StoredRoundDraft);
   }
 
   getRoundDraft(): RoundDraft | null {
-    const raw = localStorage.getItem('cf_round_draft_preview');
-    return raw ? JSON.parse(raw) : null;
+    return parseRoundDraft(localStorage.getItem(ROUND_DRAFT_PREVIEW_KEY), 'preview');
   }
 
   clearRoundDraft(): void {
-    localStorage.removeItem('cf_round_draft_preview');
+    localStorage.removeItem(ROUND_DRAFT_PREVIEW_KEY);
+  }
+
+  async probeContractViewHealth(): Promise<ContractViewHealth> {
+    return {
+      ok: false,
+      method: 'design_preview',
+      diagnostic: 'Design preview has no Studio Next contract view. Use REVIEW REAL TRANSACTION in live mode.',
+    };
   }
 
   saveProposalDraft(draft: ProposalDraft): void {
@@ -302,21 +333,57 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
         },
       },
     };
-    this.client = createClient({ chain });
+    this.client = createClient({
+      chain,
+      endpoint: NETWORK_CONFIG.rpcUrl,
+    });
     return this.client;
   }
 
-  async getRounds(): Promise<Round[]> {
-    if (!this.isConfigured()) {
-      return [];
+  /**
+   * Locked recovery rounds stay on the immutable 0x408D… contract after a
+   * corrected cutover. New rounds live on the primary configured address.
+   */
+  private resolveRoundContractAddress(id: string): string {
+    const primary = this.getContractAddress();
+    if (
+      isLockedRecoveryRound(id) &&
+      primary.toLowerCase() !== LEGACY_FUNDED_ROUND.contractAddress.toLowerCase()
+    ) {
+      return LEGACY_FUNDED_ROUND.contractAddress;
     }
+    if (
+      isLegacyUnpatchableRound(id) &&
+      primary.toLowerCase() !== LEGACY_UNPATCHABLE_CONTRACT.contractAddress.toLowerCase()
+    ) {
+      return LEGACY_UNPATCHABLE_CONTRACT.contractAddress;
+    }
+    return primary;
+  }
 
+  private resolveProposalContractAddress(id: string): string {
+    const primary = this.getContractAddress();
+    const onLegacy = LEGACY_UNPATCHABLE_CONTRACT.fundedRoundIds.some((roundId) =>
+      id.toLowerCase().startsWith(`prp-${roundId.toLowerCase()}-`)
+    );
+    if (onLegacy && primary.toLowerCase() !== LEGACY_UNPATCHABLE_CONTRACT.contractAddress.toLowerCase()) {
+      return LEGACY_UNPATCHABLE_CONTRACT.contractAddress;
+    }
+    return primary;
+  }
+
+  private shouldMergeLegacyUnpatchableRounds(primary: string): boolean {
+    const normalized = primary.toLowerCase();
+    return (
+      normalized === VERIFIED_DEPLOYMENT.contractAddress.toLowerCase() &&
+      normalized !== LEGACY_UNPATCHABLE_CONTRACT.contractAddress.toLowerCase()
+    );
+  }
+
+  private async listRoundIds(contractAddress: string): Promise<string[]> {
     const client = this.getClient();
-    const contractAddress = this.getContractAddress();
-
-    // Query total round count (strictly validated as safe non-negative integer)
     const rawCount = await withTimeout(
-      client.readContract({
+      this.readLiveContract(client, {
         address: contractAddress,
         functionName: 'get_round_ids_count',
         args: [],
@@ -325,11 +392,6 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
       'get_round_ids_count'
     );
     const totalCount = validateSafeCount(rawCount, 'get_round_ids_count');
-    if (totalCount === 0) {
-      return [];
-    }
-
-    // Paginate through round IDs in bounded chunks (max 50)
     const roundIds: string[] = [];
     const seenIds = new Set<string>();
     const pageSize = 50;
@@ -337,7 +399,7 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
     for (let offset = 0; offset < totalCount; offset += pageSize) {
       const limit = Math.min(pageSize, totalCount - offset);
       const pageIds = await withTimeout(
-        client.readContract({
+        this.readLiveContract(client, {
           address: contractAddress,
           functionName: 'get_round_ids',
           args: [offset, limit],
@@ -368,6 +430,33 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
     if (roundIds.length !== totalCount) {
       throw new Error(`Incomplete round list: expected ${totalCount} round IDs, retrieved ${roundIds.length}`);
     }
+    return roundIds;
+  }
+
+  /**
+   * Studio reads for durable UI/accounting use latest-final, matching
+   * genlayer-js docs. The SDK default is latest-nonfinal.
+   */
+  private readLiveContract(client: any, args: {
+    address: string;
+    functionName: string;
+    args: unknown[];
+  }) {
+    return client.readContract({
+      ...args,
+      jsonSafeReturn: true,
+      transactionHashVariant: TransactionHashVariant.LATEST_FINAL,
+    });
+  }
+
+  async getRounds(): Promise<Round[]> {
+    if (!this.isConfigured()) {
+      return [];
+    }
+
+    const contractAddress = this.getContractAddress();
+    const roundIds = await this.listRoundIds(contractAddress);
+    const seenIds = new Set(roundIds);
 
     // Fetch complete detail for each round without silently hiding partial list failures
     const rounds: Round[] = [];
@@ -378,6 +467,23 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
       }
       rounds.push(r);
     }
+
+    if (this.shouldMergeLegacyUnpatchableRounds(contractAddress)) {
+      const legacyAddress = LEGACY_UNPATCHABLE_CONTRACT.contractAddress;
+      const legacyIds = await this.listRoundIds(legacyAddress);
+      for (const roundId of legacyIds) {
+        if (seenIds.has(roundId)) {
+          throw new Error(`Legacy contract returned round ID "${roundId}" that is already on the live registry`);
+        }
+        seenIds.add(roundId);
+        const legacyRound = await this.readRoundFromAddress(roundId, legacyAddress);
+        if (!legacyRound) {
+          throw new Error(`Incomplete legacy round detail: contract failed to return details for "${roundId}"`);
+        }
+        rounds.push(legacyRound);
+      }
+    }
+
     return rounds;
   }
 
@@ -386,13 +492,25 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
       return null;
     }
 
+    const contractAddress = this.resolveRoundContractAddress(id);
+    const round = await this.readRoundFromAddress(id, contractAddress);
+    if (
+      !round &&
+      isLockedRecoveryRound(id) &&
+      contractAddress.toLowerCase() !== LEGACY_FUNDED_ROUND.contractAddress.toLowerCase()
+    ) {
+      return this.readRoundFromAddress(id, LEGACY_FUNDED_ROUND.contractAddress);
+    }
+    return round;
+  }
+
+  private async readRoundFromAddress(id: string, contractAddress: string): Promise<Round | null> {
     const client = this.getClient();
-    const contractAddress = this.getContractAddress();
 
     let rawData: any;
     try {
       rawData = await withTimeout(
-        client.readContract({
+        this.readLiveContract(client, {
           address: contractAddress,
           functionName: 'get_round',
           args: [id],
@@ -414,7 +532,7 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
     }
 
     const pCountRaw = await withTimeout(
-      client.readContract({
+      this.readLiveContract(client, {
         address: contractAddress,
         functionName: 'get_round_proposals_count',
         args: [id],
@@ -454,6 +572,7 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
       summary: String(rData.description || ''),
       creatorAddress: String(rData.creator || ''),
       contractAddress: contractAddress,
+      legacyRecovery: contractAddress.toLowerCase() === LEGACY_UNPATCHABLE_CONTRACT.contractAddress.toLowerCase(),
       status: mapContractRoundState(rData.state),
       totalPoolGen,
       availableGen,
@@ -463,6 +582,7 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
       capPerProposalGen: capGen,
       deadlineDisplay,
       nominationCutoffUnix: Number.isFinite(nominationCutoffUnix) ? nominationCutoffUnix : undefined,
+      votingDurationSec: Number.isFinite(Number(rData.voting_duration)) ? Number(rData.voting_duration) : undefined,
       roundEndUnix: roundEndTs > 0 ? roundEndTs : undefined,
       consensusThresholdPercent: 66.67,
       requiredVotes,
@@ -500,17 +620,26 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
     }
 
     const client = this.getClient();
-    const contractAddress = this.getContractAddress();
+    const contractAddress = this.resolveRoundContractAddress(roundId);
 
-    const rawCount = await withTimeout(
-      client.readContract({
-        address: contractAddress,
-        functionName: 'get_round_proposals_count',
-        args: [roundId],
-      }),
-      10000,
-      `get_round_proposals_count(${roundId})`
-    );
+    let rawCount: unknown;
+    try {
+      rawCount = await withTimeout(
+        this.readLiveContract(client, {
+          address: contractAddress,
+          functionName: 'get_round_proposals_count',
+          args: [roundId],
+        }),
+        10000,
+        `get_round_proposals_count(${roundId})`
+      );
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      if (msg.includes('ERR_ROUND_NOT_FOUND') || msg.includes('not found')) {
+        return [];
+      }
+      throw err;
+    }
     const totalCount = validateSafeCount(rawCount, `get_round_proposals_count(${roundId})`);
     if (totalCount === 0) {
       return [];
@@ -523,7 +652,7 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
     for (let offset = 0; offset < totalCount; offset += pageSize) {
       const limit = Math.min(pageSize, totalCount - offset);
       const page = await withTimeout(
-        client.readContract({
+        this.readLiveContract(client, {
           address: contractAddress,
           functionName: 'get_round_proposals_summary',
           args: [roundId, offset, limit],
@@ -570,6 +699,7 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
       return {
         id: String(p.proposal_id),
         roundId: String(p.round_id),
+        contractAddress,
         roundTitle: `Round #${String(p.round_id).toUpperCase()}`,
         title: String(p.title || ''),
         requestedGen,
@@ -613,12 +743,12 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
     }
 
     const client = this.getClient();
-    const contractAddress = this.getContractAddress();
+    const contractAddress = this.resolveProposalContractAddress(id);
 
     let rawData: any;
     try {
       rawData = await withTimeout(
-        client.readContract({
+        this.readLiveContract(client, {
           address: contractAddress,
           functionName: 'get_proposal',
           args: [id],
@@ -657,6 +787,7 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
     return {
       id: String(pData.proposal_id),
       roundId: String(pData.round_id),
+      contractAddress,
       roundTitle: `Round #${String(pData.round_id).toUpperCase()}`,
       title: String(pData.title || ''),
       requestedGen,
@@ -728,7 +859,7 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
 
     // Query all proposals via get_all_proposal_ids (bounded pagination)
     const rawTotalProposals = await withTimeout(
-      client.readContract({
+      this.readLiveContract(client, {
         address: contractAddress,
         functionName: 'get_all_proposal_ids_count',
         args: [],
@@ -744,7 +875,7 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
     for (let offset = 0; offset < totalProposalCount; offset += pageSize) {
       const limit = Math.min(pageSize, totalProposalCount - offset);
       const pageIds = await withTimeout(
-        client.readContract({
+        this.readLiveContract(client, {
           address: contractAddress,
           functionName: 'get_all_proposal_ids',
           args: [offset, limit],
@@ -831,16 +962,51 @@ export class TruthfulLiveDataAccessAdapter implements DataAccessAdapter {
   }
 
   saveRoundDraft(draft: RoundDraft): void {
-    localStorage.setItem('cf_round_draft_live', JSON.stringify(draft));
+    saveRoundDraftToStore(localStorage, 'live', draft as StoredRoundDraft);
   }
 
   getRoundDraft(): RoundDraft | null {
-    const raw = localStorage.getItem('cf_round_draft_live');
-    return raw ? JSON.parse(raw) : null;
+    return parseRoundDraft(localStorage.getItem(ROUND_DRAFT_LIVE_KEY), 'live');
   }
 
   clearRoundDraft(): void {
-    localStorage.removeItem('cf_round_draft_live');
+    localStorage.removeItem(ROUND_DRAFT_LIVE_KEY);
+  }
+
+  async probeContractViewHealth(): Promise<ContractViewHealth> {
+    if (!this.isConfigured()) {
+      return {
+        ok: false,
+        method: 'get_round_ids_count',
+        diagnostic: 'Contract address is not configured; Studio Next view health cannot be checked.',
+      };
+    }
+    try {
+      const rawCount = await withTimeout(
+        this.readLiveContract(this.getClient(), {
+          address: this.getContractAddress(),
+          functionName: 'get_round_ids_count',
+          args: [],
+        }),
+        10000,
+        'get_round_ids_count'
+      );
+      const totalCount = validateSafeCount(rawCount, 'get_round_ids_count');
+      return {
+        ok: true,
+        method: 'get_round_ids_count',
+        diagnostic: `Studio Next gen_call get_round_ids_count succeeded (${totalCount}) via ${NETWORK_CONFIG.rpcUrl} transaction_hash_variant=${TransactionHashVariant.LATEST_FINAL}.`,
+      };
+    } catch (err: unknown) {
+      const diagnostic = String((err as { message?: string })?.message || err || 'contract view failed');
+      const code = (err as { code?: number | string })?.code;
+      return {
+        ok: false,
+        method: 'get_round_ids_count',
+        diagnostic: `gen_call type=read method=get_round_ids_count rpc=${NETWORK_CONFIG.rpcUrl} transaction_hash_variant=${TransactionHashVariant.LATEST_FINAL}: ${diagnostic}`,
+        code: code === -32603 || code === '-32603' || /-32603/.test(diagnostic) ? -32603 : code,
+      };
+    }
   }
 
   saveProposalDraft(draft: ProposalDraft): void {

@@ -33,6 +33,22 @@ let mockStorageFailOnSave = false;
 let mockStorageFailOnPreSubmitIntent = false;
 let mockStorageFailOnAddTxId = false;
 
+const mockSession = new Map<string, string>();
+(globalThis as any).sessionStorage = {
+  getItem: (key: string) => mockSession.get(key) ?? null,
+  setItem: (key: string, val: string) => {
+    mockSession.set(key, String(val));
+  },
+  removeItem: (key: string) => {
+    mockSession.delete(key);
+  },
+  clear: () => mockSession.clear(),
+  key: (idx: number) => Array.from(mockSession.keys())[idx] ?? null,
+  get length() {
+    return mockSession.size;
+  },
+};
+
 (globalThis as any).localStorage = {
   getItem: (key: string) => {
     if (mockStorageDenied) {
@@ -91,10 +107,40 @@ import {
   buildCompositeTargetKey,
   getInMemoryBlockingMarkers,
   clearInMemoryBlockingMarkers,
+  recordedActionBlocksResubmit,
   type PreparedTransaction,
   type PersistedTx,
   type ActionType,
 } from '../frontend/src/services/transactionService';
+import {
+  setNativeTransferFeeSimulatorForTesting,
+  setNativeTransferSubmitForTesting,
+  reviveBigints,
+  type NativeTransferSubmitRequest,
+} from '../frontend/src/services/nativeTransferFees';
+import {
+  clearTxModalSnapshot,
+  closeModalResume,
+  modalAllowsSubmit,
+  openFreshQuote,
+  quoteResumeToken,
+  readTxModalSnapshot,
+  receiptStateForQuote,
+  resumeModalState,
+  resumeTxModalSnapshot,
+  seedModalSnapshot,
+  TX_MODAL_SNAPSHOT_KEY,
+  writeTxModalSnapshot,
+} from '../frontend/src/services/txModalSnapshot';
+import {
+  assessReceiptClaim,
+  identityFromCallText,
+  localForeignReceipt,
+  modalReceiptFlags,
+  payoutFeeNotice,
+  resolveReceiptIdentity,
+  setTxIdentityReaderForTesting,
+} from '../frontend/src/services/txActionIdentity';
 import { parseGenToWei, weiToGen } from '../frontend/src/services/dataAccess';
 import type { PolicyQuote, TrackedStatus, TransactionKit } from '@genlayer/transaction-kit';
 import type { DataAccessAdapter, Round, Proposal } from '../frontend/src/types';
@@ -210,8 +256,22 @@ function buildMockKit(opts: MockKitOptions = {}): TransactionKit {
   let submitCallCount = 0;
   return {
     estimate: async (input: any, _tx: any): Promise<PolicyQuote> => {
-      const userVal = input.userValue ?? 0n;
-      return buildMockPolicyQuote(opts, userVal);
+      const userVal = input.userValue ?? opts.userValue ?? 0n;
+      const quote = buildMockPolicyQuote(opts, userVal);
+      const overrides = input.overrides ?? {};
+      const distribution = quote.distribution as Record<string, unknown>;
+      for (const [key, value] of Object.entries(overrides)) {
+        if (value === undefined) continue;
+        if (key === 'rotations' && Array.isArray(value)) {
+          distribution.rotations = value.map((item) => BigInt(item as bigint));
+        } else if (typeof value === 'bigint' || typeof value === 'number' || (typeof value === 'string' && /^-?\d+$/.test(value))) {
+          distribution[key] = BigInt(value as bigint);
+        }
+      }
+      if (overrides.totalMessageFees !== undefined && opts.messageFees === undefined) {
+        quote.breakdown.messageFees = BigInt(overrides.totalMessageFees);
+      }
+      return quote;
     },
     submit: async (_quote: any, _tx: any) => {
       submitCallCount++;
@@ -323,6 +383,26 @@ class MockDataAccessAdapter implements Partial<DataAccessAdapter> {
     }
     return Object.values(this.proposals).filter((p) => p.roundId === roundId);
   }
+}
+
+function approvedProposal(id: string, recipient: string): Proposal {
+  return {
+    id,
+    roundId: 'round-open-source-rpc--mvb7nltc',
+    roundTitle: 'Open-Source RPC Health Dashboard',
+    title: 'Dashboard',
+    requestedGen: 0.05,
+    requestedAmountWei: '50000000000000000',
+    recipientAddress: recipient,
+    nominatorAddress: '0x1111111111111111111111111111111111111111',
+    status: 'APPROVED',
+    workDescription: 'Work',
+    deliverables: [],
+    matchedRuleIds: [],
+    votes: { yesCount: 1, noCount: 0, requiredYes: 1, totalEligibleVoters: 1, deadlineRemaining: '0H REMAINING' },
+    eventLog: [],
+    createdAt: '2026-10-16T17:00:00.000Z',
+  };
 }
 
 // -----------------------------------------------------------------------------
@@ -567,12 +647,16 @@ async function runWriteTests() {
     assert(prepRound.quote.source === 'network-default', 'Fee quote source is network-default (no invented suggestions)');
 
     // Message-emitting actions (withdraw_credit, claim_creator_refund) MUST be blocked
+    const withdrawAdapter = new MockDataAccessAdapter();
+    withdrawAdapter.proposals['prp-test-emit'] = approvedProposal('prp-test-emit', callerAddress);
+    withdrawAdapter.proposals['prp-test-emit-live'] = approvedProposal('prp-test-emit-live', callerAddress);
     const prepWithdraw = await prepareActionTransaction({
       action: 'withdraw_credit',
       provider,
       account: callerAddress,
       chainId: 61997,
       contractAddress,
+      adapter: withdrawAdapter as any,
       proposalId: 'prp-test-emit',
     });
     assert(prepWithdraw.isBlocked === true, 'withdraw_credit submission is blocked');
@@ -602,6 +686,7 @@ async function runWriteTests() {
       account: callerAddress,
       chainId: 61997,
       contractAddress,
+      adapter: withdrawAdapter as any,
       proposalId: 'prp-test-emit-live',
     });
     assert(prepWithdrawLive.isBlocked === false, 'withdraw_credit unblocks when messageFees are a positive bigint');
@@ -1929,6 +2014,29 @@ async function runWriteTests() {
     );
     assert(submitCount === 0, 'Recovery-round block makes zero kit.submit writes');
 
+    const { LEGACY_FUNDED_ROUND } = await import('../frontend/src/config/network');
+    await assertThrows(
+      async () =>
+        prepareActionTransaction({
+          action: 'nominate_proposal',
+          provider: windowProvider,
+          account: callerAddress,
+          chainId: 61997,
+          contractAddress,
+          adapter: new MockDataAccessAdapter() as any,
+          roundId: LEGACY_FUNDED_ROUND.roundId,
+          nominateProposalArgs: {
+            round_id: LEGACY_FUNDED_ROUND.roundId,
+            recipient: otherAddress,
+            title: 'Funded recovery round',
+            requested_amount_wei: 50000000000000000n,
+            deliverables_text: 'Deliverables specification text with sufficient characters',
+          },
+        }),
+      'RECOVERY_ROUND_NOMINATION_FORBIDDEN',
+      'Funded Studio Next round is a locked recovery/refund case'
+    );
+
     const openAdapter = new MockDataAccessAdapter();
     const openProvider = new MockEip1193Provider();
     const openPrep = await prepareActionTransaction({
@@ -1964,8 +2072,852 @@ async function runWriteTests() {
     assert(pureExpired, 'Pure cutoff helper reports EXPIRED_NOMINATION_WINDOW');
   }
 
+  // --------------------------------------------------------------------------
+  // TEST SUITE 12: Duplicate evaluation/vote guards and modal snapshot reload
+  // --------------------------------------------------------------------------
+  console.log('\n--- Test Suite 13: Fresh proposal state, duplicate submits, snapshot reload ---');
+  {
+    clearPersistedTransactions();
+    mockStore.clear();
+    mockSession.clear();
+    const proposalId = 'prp-round-open-source-rpc--mvb7nltc-1';
+    const live = new MockDataAccessAdapter();
+    const baseProposal = {
+      id: proposalId,
+      roundId: 'round-open-source-rpc--mvb7nltc',
+      roundTitle: 'Open-Source RPC Health Dashboard',
+      title: 'Dashboard',
+      requestedGen: 0.1,
+      recipientAddress: otherAddress,
+      nominatorAddress: callerAddress,
+      status: 'SUBMITTED' as const,
+      workDescription: 'Work',
+      deliverables: [],
+      matchedRuleIds: [],
+      votes: { yesCount: 0, noCount: 0, requiredYes: 1, deadlineRemaining: '48H REMAINING' },
+      eventLog: [] as { voterNode: string }[],
+      createdAt: '2026-10-16T17:00:00.000Z',
+    };
+    live.proposals[proposalId] = { ...baseProposal };
+
+    let estimates = 0;
+    let submits = 0;
+    setTransactionKitFactoryForTesting(() => {
+      const kit = buildMockKit({ submittedTxId: '0x121377a431bc73fde4595abbe22108fe07070ebcffe48ab5fb899cf6dde362c3' });
+      const estimate = kit.estimate.bind(kit);
+      const submit = kit.submit.bind(kit);
+      kit.estimate = (async (...args: Parameters<TransactionKit['estimate']>) => {
+        estimates += 1;
+        return estimate(...args);
+      }) as TransactionKit['estimate'];
+      kit.submit = (async (...args: Parameters<TransactionKit['submit']>) => {
+        submits += 1;
+        return submit(...args);
+      }) as TransactionKit['submit'];
+      return kit;
+    });
+
+    live.proposals[proposalId].status = 'ELIGIBLE';
+    await assertThrows(
+      async () =>
+        prepareActionTransaction({
+          action: 'evaluate_charter_fit',
+          provider,
+          account: callerAddress,
+          chainId: 61997,
+          contractAddress,
+          adapter: live as any,
+          proposalId,
+        }),
+      'EVALUATION_STATE_CHANGED',
+      'Stale SUBMITTED page cannot quote an evaluation once the live proposal is ELIGIBLE'
+    );
+    assert(estimates === 0 && submits === 0, 'A changed evaluation state does not quote or submit');
+
+    live.proposals[proposalId].status = 'SUBMITTED';
+    const quoted = await prepareActionTransaction({
+      action: 'evaluate_charter_fit',
+      provider,
+      account: callerAddress,
+      chainId: 61997,
+      contractAddress,
+      adapter: live as any,
+      proposalId,
+    });
+    assert(estimates === 1, 'A SUBMITTED proposal is quoted once');
+    live.proposals[proposalId].status = 'ELIGIBLE';
+    await assertThrows(
+      async () => executeAndTrackTransaction(quoted, provider, callerAddress, { adapter: live as any }),
+      'EVALUATION_STATE_CHANGED',
+      'Evaluation submit re-reads the proposal and stops when it is no longer SUBMITTED'
+    );
+    assert(submits === 0, 'The second evaluation read blocks the wallet submit');
+
+    live.getProposalById = async () => {
+      throw new Error('rate limit');
+    };
+    await assertThrows(
+      async () =>
+        prepareActionTransaction({
+          action: 'evaluate_charter_fit',
+          provider,
+          account: callerAddress,
+          chainId: 61997,
+          contractAddress,
+          adapter: live as any,
+          proposalId,
+        }),
+      'EVALUATION_STATE_READ_FAILED',
+      'A failed evaluation read does not become a quote'
+    );
+
+    live.proposals[proposalId].status = 'SUBMITTED';
+    live.getProposalById = async (id: string) => live.proposals[id] || null;
+    clearPersistedTransactions();
+    await assertThrows(
+      async () =>
+        prepareActionTransaction({
+          action: 'cast_vote',
+          provider,
+          account: callerAddress,
+          chainId: 61997,
+          contractAddress,
+          adapter: live as any,
+          proposalId,
+          castVoteArgs: { proposal_id: proposalId, vote_type: 'YES', recipientAddress: otherAddress },
+        }),
+      'VOTE_STATE_CHANGED',
+      'A vote quote requires the live proposal to be ELIGIBLE or VOTING'
+    );
+
+    live.proposals[proposalId].status = 'ELIGIBLE';
+    const voteQuote = await prepareActionTransaction({
+      action: 'cast_vote',
+      provider,
+      account: callerAddress,
+      chainId: 61997,
+      contractAddress,
+      adapter: live as any,
+      proposalId,
+      castVoteArgs: { proposal_id: proposalId, vote_type: 'YES', recipientAddress: otherAddress },
+    });
+    live.proposals[proposalId].eventLog = [{ voterNode: callerAddress }];
+    const submitsBeforeVote = submits;
+    await assertThrows(
+      async () => executeAndTrackTransaction(voteQuote, provider, callerAddress, { adapter: live as any }),
+      'ALREADY_VOTED',
+      'Vote submit re-reads ballots and blocks a duplicate YES'
+    );
+    assert(submits === submitsBeforeVote, 'An already-voted proposal does not reach wallet submit');
+
+    live.proposals[proposalId].eventLog = [];
+    live.proposals[proposalId].recipientAddress = callerAddress;
+    await assertThrows(
+      async () =>
+        prepareActionTransaction({
+          action: 'cast_vote',
+          provider,
+          account: callerAddress,
+          chainId: 61997,
+          contractAddress,
+          adapter: live as any,
+          proposalId,
+          castVoteArgs: { proposal_id: proposalId, vote_type: 'YES', recipientAddress: otherAddress },
+        }),
+      'Recipient recusal',
+      'The live recipient is recused before a vote quote'
+    );
+    live.proposals[proposalId].recipientAddress = otherAddress;
+
+    const knownHash = '0x121377a431bc73fde4595abbe22108fe07070ebcffe48ab5fb899cf6dde362c3';
+    savePersistedTransaction({
+      intentId: 'intent-eval-known',
+      txId: knownHash,
+      action: 'evaluate_charter_fit',
+      proposalId,
+      account: callerAddress,
+      chainId: 61997,
+      contractAddress,
+      targetIdentifier: `evaluate_charter_fit:${proposalId}`,
+      compositeTargetKey: `k`,
+      userValueWei: '0',
+      feeValueWei: '1',
+      totalValueWei: '1',
+      submittedAt: Date.now(),
+      status: 'finalized-success',
+    });
+    const blockedEval = recordedActionBlocksResubmit('evaluate_charter_fit', proposalId);
+    assert(blockedEval?.txId === knownHash, 'A completed evaluation record blocks another evaluation action');
+    savePersistedTransaction({
+      intentId: 'intent-vote-uncertain',
+      action: 'cast_vote',
+      proposalId,
+      account: callerAddress,
+      chainId: 61997,
+      contractAddress,
+      targetIdentifier: `cast_vote:${proposalId}`,
+      compositeTargetKey: 'vote-key',
+      userValueWei: '0',
+      feeValueWei: '1',
+      totalValueWei: '1',
+      submittedAt: Date.now(),
+      status: 'broadcast-unknown',
+    });
+    assert(
+      recordedActionBlocksResubmit('cast_vote', proposalId)?.status === 'broadcast-unknown',
+      'An uncertain vote record blocks another vote action'
+    );
+
+    const snapshotPath = `/proposals/${proposalId}`;
+    writeTxModalSnapshot({
+      open: true,
+      path: snapshotPath,
+      prepared: quoted,
+      currentTx: blockedEval,
+      livePhase: 'finalized',
+      errorMsg: null,
+      verificationResult: { verified: false, message: 'Readback uncertain' },
+    });
+    writeTxModalSnapshot({
+      open: true,
+      path: snapshotPath,
+      prepared: quoted,
+      currentTx: null,
+      livePhase: 'standby',
+      errorMsg: null,
+      verificationResult: null,
+    });
+    const reloaded = readTxModalSnapshot();
+    assert(reloaded?.currentTx?.txId === knownHash, 'Reload keeps the known evaluation hash');
+    assert(modalAllowsSubmit(reloaded!) === false, 'A stale signable snapshot cannot replace a completed or uncertain attempt');
+    assert(resumeTxModalSnapshot('/rounds/somewhere') === null, 'A redirect to another route does not restore a signable modal');
+    const returned = resumeTxModalSnapshot(snapshotPath);
+    assert(returned?.currentTx?.txId === knownHash && modalAllowsSubmit(returned) === false, 'Returning to the proposal restores the recorded attempt, not a submit button');
+    clearTxModalSnapshot();
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST SUITE 14: withdraw_credit simulation allocations survive into submit
+  // --------------------------------------------------------------------------
+  console.log('\n--- Test Suite 14: withdraw_credit fee allocation quote and submit ---');
+  {
+    clearPersistedTransactions();
+    mockStore.clear();
+    mockSession.clear();
+    setNativeTransferFeeSimulatorForTesting(null);
+    setNativeTransferSubmitForTesting(null);
+
+    const proposalId = 'prp-round-open-source-rpc--mvb7nltc-1';
+    const recipient = callerAddress;
+    const messageBudget = 25000000000000000n;
+    const simulatedFee = 40000000000000000n;
+    const live = new MockDataAccessAdapter();
+    live.proposals[proposalId] = approvedProposal(proposalId, recipient);
+
+    const allocation = {
+      messageType: 0,
+      onAcceptance: true,
+      parentIndex: 0n,
+      recipient: recipient as `0x${string}`,
+      budget: messageBudget,
+    };
+    const distribution = {
+      leaderTimeunitsAllocation: 125n,
+      validatorTimeunitsAllocation: 250n,
+      appealRounds: 3n,
+      executionBudgetPerRound: 1n,
+      executionConsumed: 0n,
+      totalMessageFees: messageBudget,
+      rotations: [1n, 1n, 1n, 1n],
+      maxPriceGenPerTimeUnit: 1n,
+      storageFeeMaxGasPrice: 1n,
+      receiptFeeMaxGasPrice: 1n,
+    };
+
+    let simulations = 0;
+    const writes: NativeTransferSubmitRequest[] = [];
+    setNativeTransferSubmitForTesting(async (request) => {
+      writes.push(request);
+      return '0xabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcd';
+    });
+    let kitSubmits = 0;
+    setTransactionKitFactoryForTesting(() => {
+      const kit = buildMockKit({
+        submittedTxId: '0xabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcd',
+        feeValue: simulatedFee,
+      });
+      const submit = kit.submit.bind(kit);
+      kit.submit = (async (...args: Parameters<TransactionKit['submit']>) => {
+        kitSubmits += 1;
+        return submit(...args);
+      }) as TransactionKit['submit'];
+      return kit;
+    });
+
+    setNativeTransferFeeSimulatorForTesting(async () => {
+      simulations += 1;
+      return { distribution, messageAllocations: [], feeValue: simulatedFee };
+    });
+    const missing = await prepareActionTransaction({
+      action: 'withdraw_credit',
+      provider,
+      account: recipient,
+      chainId: 61997,
+      contractAddress,
+      adapter: live as any,
+      proposalId,
+    });
+    assert(missing.isBlocked === true, 'A simulation with no message allocations blocks withdraw_credit');
+    assert(
+      missing.blockReason?.includes('did not return a native-transfer fee allocation') ?? false,
+      'Missing allocations name the Studio Next allocation failure'
+    );
+    assert(!missing.nativeTransfer, 'A missing allocation tree is not sealed onto the quote');
+    await assertThrows(
+      async () => executeAndTrackTransaction(missing, provider, recipient, { adapter: live as any }),
+      'did not return a native-transfer fee allocation',
+      'A missing allocation quote cannot be submitted'
+    );
+    assert(writes.length === 0 && kitSubmits === 0, 'Missing allocations do not reach a wallet write');
+
+    setNativeTransferFeeSimulatorForTesting(null);
+    setTransactionKitFactoryForTesting(() => buildMockKit({ messageFees: messageBudget, feeValue: simulatedFee }));
+    const unsealed = await prepareActionTransaction({
+      action: 'withdraw_credit',
+      provider,
+      account: recipient,
+      chainId: 61997,
+      contractAddress,
+      adapter: live as any,
+      proposalId,
+    });
+    assert(unsealed.isBlocked === false, 'A positive kit message fee still unblocks the quote gate');
+    assert(!unsealed.nativeTransfer, 'A kit-only positive fee does not invent an allocation tree');
+    const writesBeforeUnsealed = writes.length;
+    await assertThrows(
+      async () => executeAndTrackTransaction(unsealed, provider, recipient, { adapter: live as any }),
+      'missing or stale',
+      'Submit refuses a positive fee quote that has no allocation tree'
+    );
+    assert(writes.length === writesBeforeUnsealed && kitSubmits === 0, 'An unsealed quote does not call the wallet write');
+
+    setNativeTransferFeeSimulatorForTesting(async (request) => {
+      simulations += 1;
+      assert(request.proposalId === proposalId, 'Simulation is for the exact proposal');
+      assert(request.account.toLowerCase() === recipient, 'Simulation is for the recipient account');
+      assert(request.value === 0n, 'Each fresh simulation uses zero payable value');
+      return {
+        distribution,
+        messageAllocations: [{ ...allocation, recipient }],
+        feeValue: simulatedFee,
+      };
+    });
+    setTransactionKitFactoryForTesting(() => {
+      const kit = buildMockKit({ feeValue: simulatedFee });
+      const submit = kit.submit.bind(kit);
+      kit.submit = (async (...args: Parameters<TransactionKit['submit']>) => {
+        kitSubmits += 1;
+        return submit(...args);
+      }) as TransactionKit['submit'];
+      return kit;
+    });
+
+    const quoted = await prepareActionTransaction({
+      action: 'withdraw_credit',
+      provider,
+      account: recipient,
+      chainId: 61997,
+      contractAddress,
+      adapter: live as any,
+      proposalId,
+    });
+    assert(quoted.isBlocked === false, 'A covering simulation unblocks withdraw_credit');
+    assert(quoted.payableValueWei === 0n, 'Quoted payable value stays zero');
+    assert(quoted.quote.breakdown.messageFees === messageBudget, 'Quoted message fees come from the simulation distribution');
+    assert(quoted.nativeTransfer?.allocations.length === 1, 'The quote seals one message allocation');
+    assert(
+      quoted.nativeTransfer?.allocations[0]?.recipient.toLowerCase() === recipient,
+      'The sealed allocation recipient is the named recipient'
+    );
+    assert(quoted.withdrawRecipient === recipient, 'The review recipient is the named recipient');
+
+    const stale = {
+      ...quoted,
+      nativeTransfer: quoted.nativeTransfer
+        ? {
+            ...quoted.nativeTransfer,
+            allocations: [{ ...quoted.nativeTransfer.allocations[0], recipient: otherAddress as `0x${string}` }],
+          }
+        : undefined,
+    };
+    const writesBeforeStale = writes.length;
+    await assertThrows(
+      async () => executeAndTrackTransaction(stale, provider, recipient, { adapter: live as any }),
+      'missing or stale',
+      'A changed allocation recipient is rejected before signing'
+    );
+    assert(writes.length === writesBeforeStale, 'A stale allocation does not reach the wallet write');
+
+    const mismatched = {
+      ...quoted,
+      quote: {
+        ...quoted.quote,
+        feeValue: simulatedFee - 1n,
+        distribution: { ...quoted.quote.distribution, totalMessageFees: messageBudget - 1n },
+      },
+    };
+    await assertThrows(
+      async () => executeAndTrackTransaction(mismatched, provider, recipient, { adapter: live as any }),
+      'below Studio Next',
+      'A quote below the simulated fee or message budget is rejected'
+    );
+    assert(writes.length === writesBeforeStale, 'A mismatched quote does not reach the wallet write');
+
+    const switched = new MockEip1193Provider();
+    switched.account = otherAddress;
+    await assertThrows(
+      async () => executeAndTrackTransaction(quoted, switched, recipient, { adapter: live as any }),
+      'Wallet switch detected after quote',
+      'An account switch after the withdrawal quote requires a fresh simulation'
+    );
+    assert(writes.length === writesBeforeStale, 'An account switch does not submit the previous allocation');
+
+    const revived = JSON.parse(
+      JSON.stringify(quoted, (_key, value) => (typeof value === 'bigint' ? { __bigint: value.toString() } : value)),
+      reviveBigints
+    ) as PreparedTransaction;
+    const carried = await executeAndTrackTransaction(revived, provider, recipient, { adapter: live as any });
+    assert(writes.length === writesBeforeStale + 1, 'The wallet submit receives the revived quote once');
+    assert(kitSubmits === 0, 'withdraw_credit does not use the Transaction Kit submit path');
+    const sent = writes[writes.length - 1];
+    assert(sent.functionName === 'withdraw_credit', 'Submitted method is withdraw_credit');
+    assert(sent.args[0] === proposalId, 'Submitted args carry the exact proposal');
+    assert(sent.value === 0n, 'Submitted payable value is zero');
+    assert(sent.fees.feeValue === simulatedFee, 'Submitted feeValue is the quoted fee');
+    assert(sent.fees.distribution.totalMessageFees === messageBudget, 'Submitted distribution keeps the simulated message fees');
+    assert(sent.fees.messageAllocations.length === 1, 'Submitted payload includes one allocation');
+    assert(
+      String(sent.fees.messageAllocations[0].recipient).toLowerCase() === recipient,
+      'Submitted allocation recipient matches the quote'
+    );
+    assert(sent.fees.messageAllocations[0].budget === messageBudget, 'Submitted allocation budget matches the quote');
+    assert(carried.txId === '0xabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcd', 'Successful submit keeps the returned transaction id');
+    assert(carried.status === 'finalized-success', 'A finalized return is recorded as success');
+
+    clearPersistedTransactions();
+    live.proposals[proposalId].status = 'APPROVED';
+    setTransactionKitFactoryForTesting(() =>
+      buildMockKit({
+        feeValue: simulatedFee,
+        phase: 'processing',
+        statusName: 'COMMITTING',
+        executionResultName: null,
+      })
+    );
+    const uncertainQuote = await prepareActionTransaction({
+      action: 'withdraw_credit',
+      provider,
+      account: recipient,
+      chainId: 61997,
+      contractAddress,
+      adapter: live as any,
+      proposalId,
+    });
+    const uncertain = await executeAndTrackTransaction(uncertainQuote, provider, recipient, { adapter: live as any });
+    assert(uncertain.status === 'unresolved', 'A receipt without a finalized result stays unresolved');
+    assert(Boolean(uncertain.txId), 'The unresolved withdrawal keeps its transaction id');
+    assert(
+      modalAllowsSubmit({
+        currentTx: uncertain,
+        livePhase: uncertain.phase || 'processing',
+        errorMsg: uncertain.error || null,
+        verificationResult: null,
+      }) === false,
+      'An uncertain withdrawal receipt is not a new sign button'
+    );
+    assert(
+      recordedActionBlocksResubmit('withdraw_credit', proposalId)?.txId === uncertain.txId,
+      'The uncertain withdrawal record blocks another withdrawal'
+    );
+    await assertThrows(
+      async () =>
+        prepareActionTransaction({
+          action: 'withdraw_credit',
+          provider,
+          account: recipient,
+          chainId: 61997,
+          contractAddress,
+          adapter: live as any,
+          proposalId,
+        }),
+      'already recorded',
+      'A second withdrawal quote is refused while the receipt is uncertain'
+    );
+    const snapshotPath = `/proposals/${proposalId}`;
+    writeTxModalSnapshot({
+      open: true,
+      path: snapshotPath,
+      prepared: uncertainQuote,
+      currentTx: uncertain,
+      livePhase: 'processing',
+      errorMsg: 'Tracking timeout reached. Transaction may still be executing on-chain.',
+      verificationResult: { verified: false, message: 'Readback uncertain' },
+    });
+    writeTxModalSnapshot({
+      open: true,
+      path: snapshotPath,
+      prepared: uncertainQuote,
+      currentTx: null,
+      livePhase: 'standby',
+      errorMsg: null,
+      verificationResult: null,
+    });
+    const reloaded = readTxModalSnapshot();
+    assert(simulations > 0, 'The withdrawal quote used a fresh fee simulation');
+    assert(reloaded?.currentTx?.txId === uncertain.txId, 'Reload keeps the uncertain withdrawal hash');
+    assert(modalAllowsSubmit(reloaded!) === false, 'A stale signable snapshot cannot replace an uncertain withdrawal');
+    clearTxModalSnapshot();
+    clearPersistedTransactions();
+    setNativeTransferFeeSimulatorForTesting(null);
+    setNativeTransferSubmitForTesting(null);
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST SUITE 15: a finalized vote hash must not complete a withdrawal modal
+  // --------------------------------------------------------------------------
+  console.log('\n--- Test Suite 15: cross-action receipt identity ---');
+  {
+    clearTxModalSnapshot();
+    mockSession.clear();
+    const proposalId = 'prp-round-open-source-rpc--mvb7nltc-1';
+    const recipient = '0x31e14df3b4f47F2428F3B78E7279691A78f70a05';
+    const creator = '0xb3F7518df619ef485f7a1568ED3705bB6f5B0407';
+    const liveContract = '0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8';
+    const voteHash = '0x899a922020fde7f680e39812df9d344d04f1c5702f71099e9648d528f3684526';
+    const payoutHash = '0xabababababababababababababababababababababababababababababababab';
+    const childHash = '0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd';
+    const credit = '50000000000000000';
+    const snapshotPath = `/proposals/${proposalId}`;
+    const withdrawPrepared = {
+      action: 'withdraw_credit',
+      targetIdentifier: `withdraw_credit:${proposalId}`,
+      compositeTargetKey: `${recipient.toLowerCase()}:61997:${liveContract.toLowerCase()}:withdraw_credit:${proposalId}`,
+      proposalId,
+      submitInput: {
+        kind: 'write',
+        address: liveContract,
+        method: 'withdraw_credit',
+        args: [proposalId],
+      },
+      quotedAccount: recipient.toLowerCase(),
+      quotedChainId: 61997,
+      quotedContractAddress: liveContract.toLowerCase(),
+      quotedArgsJson: JSON.stringify({ kind: 'write', method: 'withdraw_credit', args: [proposalId] }),
+      withdrawRecipient: recipient.toLowerCase(),
+    } as PreparedTransaction;
+    const voteTx: PersistedTx = {
+      intentId: 'intent-vote-899a',
+      txId: voteHash,
+      action: 'cast_vote',
+      proposalId,
+      account: creator.toLowerCase(),
+      chainId: 61997,
+      contractAddress: liveContract.toLowerCase(),
+      targetIdentifier: `cast_vote:${proposalId}`,
+      compositeTargetKey: `${creator.toLowerCase()}:61997:${liveContract.toLowerCase()}:cast_vote:${proposalId}`,
+      userValueWei: '0',
+      feeValueWei: '1',
+      totalValueWei: '1',
+      intendedArgumentsJson: JSON.stringify({
+        kind: 'write',
+        method: 'cast_vote',
+        args: [proposalId, 'YES'],
+      }),
+      submittedAt: 1,
+      status: 'finalized-success',
+    };
+    const decoded = identityFromCallText(
+      '{"":"cast_vote","args":["prp-round-open-source-rpc--mvb7nltc-1","YES",]}'
+    );
+    assert(decoded.method === 'cast_vote', 'Readable vote calldata identifies cast_vote');
+    assert(
+      decoded.args[0] === proposalId && decoded.args[1] === 'YES',
+      'Readable vote calldata keeps the proposal id and YES argument'
+    );
+
+    writeTxModalSnapshot({
+      open: true,
+      path: snapshotPath,
+      prepared: withdrawPrepared,
+      currentTx: voteTx,
+      livePhase: 'finalized',
+      errorMsg: null,
+      verificationResult: { verified: true, message: 'Ballot on proposal recorded on-chain.' },
+    });
+    assert(readTxModalSnapshot() === null, 'A cross-action write does not store the vote hash as a withdrawal receipt');
+
+    sessionStorage.setItem(
+      TX_MODAL_SNAPSHOT_KEY,
+      JSON.stringify({
+        open: true,
+        path: snapshotPath,
+        prepared: withdrawPrepared,
+        currentTx: voteTx,
+        livePhase: 'finalized',
+        errorMsg: null,
+        verificationResult: { verified: true, message: 'Ballot on proposal recorded on-chain.' },
+      })
+    );
+    const reloaded = resumeTxModalSnapshot(snapshotPath);
+    assert(reloaded?.currentTx?.txId === voteHash, 'Reload keeps the injected vote hash');
+    assert(reloaded?.currentTx?.action === 'cast_vote', 'Reload keeps the vote action on that hash');
+    assert(reloaded?.verificationResult?.verified === false, 'Reload does not keep a verified receipt for the foreign hash');
+    assert(modalAllowsSubmit(reloaded!) === false, 'The injected vote hash cannot become a withdrawal submit button');
+    const local = localForeignReceipt(withdrawPrepared, voteTx);
+    assert(Boolean(local && local.includes('cast_vote') && local.includes(voteHash)), 'The local mismatch names the vote hash');
+    const reloadFlags = modalReceiptFlags({
+      preparedAction: 'withdraw_credit',
+      currentTx: voteTx,
+      verificationVerified: true,
+      receipt: { claim: 'identity-mismatch', hash: voteHash, message: local || '' },
+      connectedAccount: recipient,
+      quotedAccount: recipient,
+    });
+    assert(reloadFlags.workflowComplete === false, 'A verified vote result does not complete the withdrawal modal');
+    assert(Boolean(reloadFlags.identityError), 'The withdrawal modal surfaces an identity error');
+
+    writeTxModalSnapshot({
+      open: true,
+      path: snapshotPath,
+      prepared: withdrawPrepared,
+      currentTx: null,
+      livePhase: 'standby',
+      errorMsg: null,
+      verificationResult: null,
+    });
+    const kept = readTxModalSnapshot();
+    assert(kept?.currentTx?.txId === voteHash, 'A later signable snapshot cannot erase the injected vote hash');
+    assert(modalAllowsSubmit(kept!) === false, 'The preserved mismatch stays non-signable');
+
+    const switched = modalReceiptFlags({
+      preparedAction: 'withdraw_credit',
+      currentTx: voteTx,
+      verificationVerified: true,
+      receipt: { claim: 'identity-mismatch', hash: voteHash, message: local || '' },
+      connectedAccount: creator,
+      quotedAccount: recipient,
+    });
+    assert(switched.accountBlocked === true, 'An account switch away from the quoted recipient is blocked');
+    assert(switched.workflowComplete === false, 'An account switch does not complete the contaminated withdrawal modal');
+
+    const observedVote = {
+      readStatus: 'ok' as const,
+      sender: creator,
+      contract: liveContract,
+      method: 'cast_vote',
+      args: [proposalId, 'YES'],
+      finalizedSuccess: true,
+      triggeredTxIds: [],
+      proposalState: 'APPROVED',
+      creditWithdrawn: false,
+    };
+    const chainMismatch = assessReceiptClaim(
+      withdrawPrepared,
+      { ...voteTx, action: 'withdraw_credit', account: recipient.toLowerCase() },
+      observedVote
+    );
+    assert(chainMismatch.claim === 'identity-mismatch', 'On-chain cast_vote is not a withdrawal even if the local label was changed');
+    assert(
+      chainMismatch.claim === 'identity-mismatch' && chainMismatch.message.includes('cast_vote') && chainMismatch.message.includes(creator),
+      'The chain mismatch names the vote method and creator signer'
+    );
+    const chainFlags = modalReceiptFlags({
+      preparedAction: 'withdraw_credit',
+      currentTx: voteTx,
+      verificationVerified: true,
+      receipt: chainMismatch,
+      connectedAccount: recipient,
+      quotedAccount: recipient,
+    });
+    assert(chainFlags.workflowComplete === false, 'Chain identity failure blocks WORKFLOW COMPLETE');
+
+    setTxIdentityReaderForTesting(async () => observedVote);
+    const resolved = await resolveReceiptIdentity(withdrawPrepared, voteTx);
+    assert(resolved.claim === 'identity-mismatch', 'The receipt resolver reports the vote hash as a mismatch');
+    setTxIdentityReaderForTesting(async () => {
+      throw new Error('identity rpc unavailable');
+    });
+    const unresolved = await resolveReceiptIdentity(withdrawPrepared, voteTx);
+    assert(unresolved.claim === 'identity-mismatch', 'A failed identity read of a foreign hash stays an identity error');
+    assert(
+      unresolved.claim === 'identity-mismatch' && unresolved.message.includes(voteHash),
+      'The uncertain foreign hash is still preserved in the error'
+    );
+
+    const uncertain = assessReceiptClaim(
+      withdrawPrepared,
+      { txId: payoutHash },
+      { readStatus: 'uncertain', detail: 'latest-final read failed' }
+    );
+    assert(uncertain.claim === 'uncertain', 'An unreadable withdrawal hash stays uncertain');
+    const uncertainFlags = modalReceiptFlags({
+      preparedAction: 'withdraw_credit',
+      currentTx: { txId: payoutHash, status: 'finalized-success' },
+      verificationVerified: true,
+      receipt: uncertain,
+      connectedAccount: recipient,
+      quotedAccount: recipient,
+    });
+    assert(uncertainFlags.workflowComplete === false, 'An uncertain receipt is not WORKFLOW COMPLETE');
+    assert(Boolean(uncertainFlags.uncertainMessage), 'The uncertain receipt keeps an explicit reconciliation message');
+
+    const parentOnly = assessReceiptClaim(withdrawPrepared, { txId: payoutHash }, {
+      readStatus: 'ok',
+      sender: recipient,
+      contract: liveContract,
+      method: 'withdraw_credit',
+      args: [proposalId],
+      finalizedSuccess: true,
+      triggeredTxIds: [],
+      proposalState: 'PAYOUT_EMITTED',
+      creditWithdrawn: true,
+      requestedAmountWei: credit,
+      childReadStatus: 'absent',
+    });
+    assert(parentOnly.claim === 'parent-matched', 'PAYOUT_EMITTED without a child transfer is not delivery');
+    assert(
+      modalReceiptFlags({
+        preparedAction: 'withdraw_credit',
+        currentTx: { txId: payoutHash, status: 'finalized-success' },
+        verificationVerified: true,
+        receipt: parentOnly,
+        connectedAccount: recipient,
+        quotedAccount: recipient,
+      }).workflowComplete === false,
+      'A parent-only payout does not show WORKFLOW COMPLETE'
+    );
+
+    const delivered = assessReceiptClaim(withdrawPrepared, { txId: payoutHash }, {
+      readStatus: 'ok',
+      sender: recipient,
+      contract: liveContract,
+      method: 'withdraw_credit',
+      args: [proposalId],
+      finalizedSuccess: true,
+      triggeredTxIds: [childHash],
+      proposalState: 'PAYOUT_EMITTED',
+      creditWithdrawn: true,
+      requestedAmountWei: credit,
+      childHash,
+      childRecipient: recipient,
+      childValueWei: credit,
+      childReadStatus: 'ok',
+    });
+    assert(delivered.claim === 'delivered', 'A matching child transfer can complete a withdrawal');
+    assert(
+      delivered.claim === 'delivered' && delivered.childHash === childHash,
+      'The genuine payout reports the child transaction hash'
+    );
+    assert(
+      modalReceiptFlags({
+        preparedAction: 'withdraw_credit',
+        currentTx: { txId: payoutHash, status: 'finalized-success' },
+        verificationVerified: true,
+        receipt: delivered,
+        connectedAccount: recipient,
+        quotedAccount: recipient,
+      }).workflowComplete === true,
+      'A genuine payout with matching delivery can show WORKFLOW COMPLETE'
+    );
+
+    const blockedFee = payoutFeeNotice('withdraw_credit', 0n);
+    const measuredFee = payoutFeeNotice('withdraw_credit', 1n);
+    assert(blockedFee?.tone === 'blocked' && blockedFee.text.includes('Zero or missing'), 'A zero message fee keeps the blocking warning');
+    assert(measuredFee?.tone === 'measured', 'A positive message fee is described as measured');
+    assert(
+      Boolean(measuredFee && !measuredFee.text.includes('Zero or missing') && measuredFee.text.includes('1')),
+      'A positive message fee does not keep the stale zero-fee sentence'
+    );
+    const ballotMessage = 'Ballot on proposal recorded on-chain.';
+    const quotedWithdraw = { ...withdrawPrepared, quotedAt: 1_700_000_000_000 };
+    const savedVote = savePersistedTransaction(voteTx);
+    assert(savedVote.success === true, 'The historical vote record can be stored in cf_active_txs_rc2');
+    const voteRecord = mockStore.get('cf_active_txs_rc2') || '';
+    assert(voteRecord.includes(voteHash), 'cf_active_txs_rc2 contains the vote hash before the modal closes');
+    sessionStorage.setItem(
+      TX_MODAL_SNAPSHOT_KEY,
+      JSON.stringify({
+        open: true,
+        path: snapshotPath,
+        prepared: quotedWithdraw,
+        currentTx: voteTx,
+        livePhase: 'finalized',
+        errorMsg: null,
+        verificationResult: { verified: true, message: ballotMessage },
+      })
+    );
+    const resumed = resumeModalState(snapshotPath);
+    assert(resumed.show === true, 'Reload opens the contaminated withdrawal modal');
+    assert(resumed.initialSnapshot?.currentTx?.txId === voteHash, 'Reload restores the vote hash into the in-memory snapshot');
+    const contaminated = receiptStateForQuote(true, resumed.prepared, resumed.initialSnapshot, snapshotPath);
+    assert(contaminated.currentTx?.txId === voteHash, 'The restored receipt still shows the vote hash');
+    assert(
+      quoteResumeToken(true, resumed.prepared, resumed.initialSnapshot).includes(voteHash),
+      'The open resume token still carries the vote hash'
+    );
+    const freshQuote = { ...quotedWithdraw, quotedAt: quotedWithdraw.quotedAt + 1 };
+    const reattached = seedModalSnapshot(freshQuote, resumed.initialSnapshot, snapshotPath);
+    assert(reattached?.currentTx?.txId === voteHash, 'Passing the retained snapshot into a new quote would reattach the vote hash');
+
+    const closed = closeModalResume(resumed);
+    assert(closed.show === false && closed.initialSnapshot === null, 'Close drops the in-memory snapshot');
+    assert(readTxModalSnapshot() === null, 'Close drops the session snapshot');
+    const closedReceipt = receiptStateForQuote(false, closed.prepared, closed.initialSnapshot, snapshotPath);
+    assert(
+      closedReceipt.currentTx == null &&
+        closedReceipt.livePhase === 'standby' &&
+        closedReceipt.errorMsg == null &&
+        closedReceipt.verificationResult == null,
+      'Closing resets the modal receipt state'
+    );
+    assert(mockStore.get('cf_active_txs_rc2') === voteRecord, 'Close does not rewrite cf_active_txs_rc2');
+
+    const opened = openFreshQuote(closed, freshQuote);
+    assert(opened.show === true && opened.initialSnapshot === null, 'A fresh quote does not keep the resume snapshot');
+    assert(
+      !quoteResumeToken(true, opened.prepared, opened.initialSnapshot).includes(voteHash),
+      'The fresh quote token has no vote hash'
+    );
+    const visible = receiptStateForQuote(true, opened.prepared, opened.initialSnapshot, snapshotPath);
+    const visibleText = JSON.stringify(visible);
+    assert(!visible.currentTx?.txId, 'The fresh withdrawal quote has no transaction hash');
+    assert(!visibleText.includes(voteHash), 'The fresh receipt does not contain the vote hash');
+    assert(visible.verificationResult == null, 'The fresh quote drops the old verification');
+    assert(!visibleText.includes(ballotMessage), 'The fresh receipt does not contain the old ballot verification');
+    assert(!visibleText.includes('WORKFLOW COMPLETE'), 'The fresh receipt state has no workflow-complete label');
+    const freshFlags = modalReceiptFlags({
+      preparedAction: 'withdraw_credit',
+      currentTx: visible.currentTx,
+      verificationVerified: visible.verificationResult?.verified ?? null,
+      receipt: null,
+      connectedAccount: recipient,
+      quotedAccount: recipient,
+    });
+    assert(freshFlags.workflowComplete === false, 'The fresh withdrawal quote does not show WORKFLOW COMPLETE');
+    assert(
+      getPersistedTransactions().some((tx) => tx.txId === voteHash && tx.action === 'cast_vote'),
+      'The historical cast_vote record remains in cf_active_txs_rc2'
+    );
+    assert(mockStore.get('cf_active_txs_rc2') === voteRecord, 'The fresh quote does not rewrite cf_active_txs_rc2');
+
+    setTxIdentityReaderForTesting(null);
+    clearTxModalSnapshot();
+  }
+
   // Reset kit factory
   setTransactionKitFactoryForTesting(null);
+  setNativeTransferFeeSimulatorForTesting(null);
+  setNativeTransferSubmitForTesting(null);
 
   console.log('\n================================================================');
   console.log(`ALL WRITE REGRESSION TESTS PASSED: ${passedTests} / ${totalTests}`);

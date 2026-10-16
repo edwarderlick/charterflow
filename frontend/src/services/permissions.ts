@@ -1,7 +1,5 @@
-import { VERIFIED_DEPLOYMENT } from '../config/network';
+import { isLegacyUnpatchableRound, isLockedRecoveryRound, legacyAiVoteWriteBlock } from '../config/network';
 import type { Proposal, Round } from '../types';
-
-const RECOVERY_ROUND_ID = VERIFIED_DEPLOYMENT.intendedRoundId;
 
 export interface PermissionDecision {
   allowed: boolean;
@@ -66,8 +64,14 @@ export function canNominate(params: {
   if (!params.round) {
     return { allowed: false, reason: 'Round state is unavailable. Nomination is blocked until a live get_round read succeeds.' };
   }
-  if (params.round.id.toLowerCase() === RECOVERY_ROUND_ID.toLowerCase()) {
-    return { allowed: false, reason: `RECOVERY_ROUND_NOMINATION_FORBIDDEN: ${RECOVERY_ROUND_ID} is a locked recovery/refund case.` };
+  if (isLockedRecoveryRound(params.round.id)) {
+    return { allowed: false, reason: `RECOVERY_ROUND_NOMINATION_FORBIDDEN: ${params.round.id} is a locked recovery/refund case.` };
+  }
+  if (isLegacyUnpatchableRound(params.round.id) || params.round.legacyRecovery) {
+    return {
+      allowed: false,
+      reason: 'WRITE BLOCKED: nomination into legacy contract 0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48 is closed. The round stays visible for recovery only.',
+    };
   }
   if (!params.connected || !params.account) {
     return { allowed: false, reason: 'Only a listed committee member may nominate. Connect a roster wallet to submit. Anyone may still read the round.' };
@@ -93,6 +97,14 @@ export function canNominate(params: {
 }
 
 export function canEvaluateCharterFit(params: { proposal?: Proposal | null; connected: boolean; correctChain: boolean }): PermissionDecision {
+  const legacyBlock = legacyAiVoteWriteBlock({
+    contractAddress: params.proposal?.contractAddress,
+    roundId: params.proposal?.roundId,
+    proposalId: params.proposal?.id,
+  });
+  if (legacyBlock) {
+    return { allowed: false, reason: legacyBlock };
+  }
   if (!params.proposal) {
     return { allowed: false, reason: 'Proposal state is unavailable.' };
   }
@@ -116,6 +128,14 @@ export function canVote(params: {
   proposal?: Proposal | null;
   hasAlreadyVoted?: boolean;
 }): PermissionDecision {
+  const legacyBlock = legacyAiVoteWriteBlock({
+    contractAddress: params.round?.contractAddress || params.proposal?.contractAddress,
+    roundId: params.round?.id || params.proposal?.roundId,
+    proposalId: params.proposal?.id,
+  });
+  if (legacyBlock) {
+    return { allowed: false, reason: legacyBlock };
+  }
   if (!params.proposal || !params.round) {
     return { allowed: false, reason: 'Proposal or round state is unavailable.' };
   }

@@ -44,6 +44,67 @@ export function shouldAdoptAuthorizedAccounts(session: WalletSession | null): bo
   return session?.status === 'connected';
 }
 
+/**
+ * accountsChanged must not restore a session the user cleared.
+ * A connected session still follows the wallet's current account (including empty = locked/disconnected).
+ */
+export function applyAccountsChanged(
+  session: WalletSession | null,
+  incomingAccounts: unknown
+): { adopt: boolean; account: string | null } {
+  const list = Array.isArray(incomingAccounts)
+    ? incomingAccounts.map((item) => String(item)).filter((item) => item.length > 0)
+    : [];
+  if (!shouldAdoptAuthorizedAccounts(session)) {
+    return { adopt: false, account: null };
+  }
+  return { adopt: true, account: list[0] ?? null };
+}
+
+export interface AsyncWalletGate {
+  epoch: number;
+  status?: WalletSession['status'] | null;
+  rdns?: string;
+  provider?: unknown;
+  requireConnected?: boolean;
+}
+
+/**
+ * In-flight eth_chainId / eth_accounts / eth_requestAccounts / balance reads must
+ * re-check the live session. CLEAR SESSION and provider switches bump epoch so a
+ * late promise cannot restore an account or balance.
+ */
+export function shouldAdoptAsyncWalletResult(
+  started: AsyncWalletGate,
+  current: AsyncWalletGate
+): boolean {
+  if (started.epoch !== current.epoch) return false;
+  if (started.requireConnected && current.status !== 'connected') return false;
+  if (started.rdns && current.rdns && started.rdns !== current.rdns) return false;
+  if (started.provider != null && current.provider != null && started.provider !== current.provider) {
+    return false;
+  }
+  return true;
+}
+
+export function firstAccountFromProviderAccounts(accounts: unknown): string | null {
+  if (!Array.isArray(accounts)) return null;
+  const list = accounts.map((item) => String(item)).filter((item) => item.length > 0);
+  return list[0] ?? null;
+}
+
+export async function adoptSettledWalletAccounts(params: {
+  pendingAccounts: Promise<unknown>;
+  started: AsyncWalletGate;
+  getCurrent: () => AsyncWalletGate;
+}): Promise<string | null> {
+  const accounts = await params.pendingAccounts;
+  if (!shouldAdoptAsyncWalletResult(params.started, params.getCurrent())) {
+    return null;
+  }
+  return firstAccountFromProviderAccounts(accounts);
+}
+
 export function classifyWalletError(err: unknown): { code?: number | string; message: string } {
   const anyErr = err as { code?: number | string; message?: string } | null;
   const code = anyErr?.code;

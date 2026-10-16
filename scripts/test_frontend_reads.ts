@@ -21,12 +21,14 @@ import {
   mapContractProposalState,
   mapContractRoundState,
 } from '../frontend/src/services/dataAccess';
-import { NETWORK_CONFIG, VERIFIED_DEPLOYMENT, isContractConfigured } from '../frontend/src/config/network';
+import { NETWORK_CONFIG, VERIFIED_DEPLOYMENT, LEGACY_UNPATCHABLE_CONTRACT, isContractConfigured } from '../frontend/src/config/network';
 import { studioDevnet, studionet } from 'genlayer-js/chains';
 
 interface MockCall {
   functionName: string;
   args: any[];
+  address?: string;
+  transactionHashVariant?: string;
 }
 
 class MockGenLayerClient {
@@ -37,14 +39,19 @@ class MockGenLayerClient {
     this.responses[functionName] = resp;
   }
 
-  async readContract(params: { address: string; functionName: string; args: any[] }) {
-    this.calls.push({ functionName: params.functionName, args: params.args });
+  async readContract(params: { address: string; functionName: string; args: any[]; transactionHashVariant?: string }) {
+    this.calls.push({
+      functionName: params.functionName,
+      args: params.args,
+      address: params.address,
+      transactionHashVariant: params.transactionHashVariant,
+    });
     const handler = this.responses[params.functionName];
     if (handler === undefined) {
       throw new Error(`[MockClient] Unhandled functionName: ${params.functionName}`);
     }
     if (typeof handler === 'function') {
-      return handler(params.args);
+      return handler(params.args, params);
     }
     return handler;
   }
@@ -147,8 +154,79 @@ async function runTests() {
 
     const rounds = await adapter.getRounds();
     assert(Array.isArray(rounds) && rounds.length === 0, 'Configured contract with 0 rounds returns empty array without throwing');
-    assert(mockClient.calls.length === 1, 'Only get_round_ids_count was queried');
+    assert(mockClient.calls.length === 1, 'A non-verified address does not merge the legacy registry');
     assert(mockClient.calls[0].functionName === 'get_round_ids_count', 'Queried get_round_ids_count');
+    assert(mockClient.calls[0].transactionHashVariant === 'latest-final', 'Live reads request latest-final');
+
+    const health = await adapter.probeContractViewHealth();
+    assert(health.ok === true, 'Health probe succeeds when get_round_ids_count returns 0');
+    assert(health.method === 'get_round_ids_count', 'Health probe uses get_round_ids_count');
+    assert(
+      mockClient.calls[mockClient.calls.length - 1].transactionHashVariant === 'latest-final',
+      'Health probe requests latest-final'
+    );
+  }
+
+  console.log('\n--- Test Suite 2b: Verified address also reads labeled legacy rounds ---');
+  {
+    const mockClient = new MockGenLayerClient();
+    const legacyRound = {
+      round_id: 'round-studio-next-rpc--mvarlewq',
+      title: 'Studio Next RPC Health Dashboard Pilot',
+      description: 'Legacy funded round',
+      creator: '0x31e14df3b4f47F2428F3B78E7279691A78f70a05',
+      state: 'ACTIVE',
+      initial_deposit: '1000000000000000000',
+      available_wei: '1000000000000000000',
+      reserved_wei: '0',
+      approved_credits_wei: '0',
+      payouts_emitted_wei: '0',
+      grant_cap_wei: '100000000000000000',
+      round_end: 1793094393,
+      nomination_cutoff: 1792748793,
+      created_at: 1792144014,
+      charter_text: 'Legacy charter',
+      committee_roster: ['0x7E4E1f7DcC3DA063F9110477Ad348C90E8599253'],
+    };
+    mockClient.setResponse('get_round_ids_count', (_args: any[], params: { address: string }) =>
+      params.address.toLowerCase() === LEGACY_UNPATCHABLE_CONTRACT.contractAddress.toLowerCase() ? 1 : 0
+    );
+    mockClient.setResponse('get_round_ids', () => ['round-studio-next-rpc--mvarlewq']);
+    mockClient.setResponse('get_round', () => legacyRound);
+    mockClient.setResponse('get_round_proposals_count', () => 0);
+    const adapter = new TruthfulLiveDataAccessAdapter(mockClient, VERIFIED_DEPLOYMENT.contractAddress);
+    const rounds = await adapter.getRounds();
+    assert(rounds.length === 1, 'Verified empty registry still surfaces the legacy funded round');
+    assert(rounds[0].legacyRecovery === true, 'Merged legacy round is labeled for recovery');
+    assert(
+      rounds[0].contractAddress?.toLowerCase() === LEGACY_UNPATCHABLE_CONTRACT.contractAddress.toLowerCase(),
+      'Merged legacy round keeps the 0x9579 contract address'
+    );
+    const proposalAdapter = new TruthfulLiveDataAccessAdapter(mockClient, VERIFIED_DEPLOYMENT.contractAddress);
+    mockClient.setResponse('get_proposal', () => ({
+      proposal_id: 'prp-round-studio-next-rpc--mvas9jju-1',
+      round_id: 'round-studio-next-rpc--mvas9jju',
+      title: 'Legacy proposal',
+      recipient: '0x31e14df3b4f47F2428F3B78E7279691A78f70a05',
+      proposer: '0x7E4E1f7DcC3DA063F9110477Ad348C90E8599253',
+      requested_amount_wei: '50000000000000000',
+      deliverables_text: 'Legacy deliverable',
+      state: 'SUBMITTED',
+      review_verdict: 'PENDING',
+      review_reason: '',
+      submission_timestamp: 1792145774,
+      voting_deadline: 0,
+      votes_yes: 0,
+      votes_no: 0,
+      voted_addresses: [],
+    }));
+    const proposal = await proposalAdapter.getProposalById('prp-round-studio-next-rpc--mvas9jju-1');
+    const proposalRead = mockClient.calls.filter((call) => call.functionName === 'get_proposal').at(-1);
+    assert(proposal?.status === 'SUBMITTED', 'Legacy proposal remains readable');
+    assert(
+      proposalRead?.address?.toLowerCase() === LEGACY_UNPATCHABLE_CONTRACT.contractAddress.toLowerCase(),
+      'Legacy proposal is read from 0x9579, not the verified contract'
+    );
   }
 
   // --------------------------------------------------------------------------
@@ -401,6 +479,10 @@ async function runTests() {
     assert(client !== null && client !== undefined, 'Adapter initializes client');
     assert(client.chain.id === 61997, 'Adapter client chain ID is 61997');
     assert(client.chain.name === 'GenLayer Studio Devnet', 'Adapter client chain name matches studioDevnet');
+    assert(
+      client.chain.rpcUrls.default.http[0] === NETWORK_CONFIG.rpcUrl,
+      'Adapter client RPC is NETWORK_CONFIG.rpcUrl (Studio Next), not the SDK studio-dev default'
+    );
     assert(
       client.chain.consensusMainContract.address === studioDevnet.consensusMainContract.address,
       'Preserves consensusMainContract from studioDevnet'

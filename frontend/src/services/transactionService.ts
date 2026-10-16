@@ -7,7 +7,26 @@ import {
   type Eip1193Provider,
 } from '@genlayer/transaction-kit';
 import { studioDevnet } from 'genlayer-js/chains';
-import { NETWORK_CONFIG, isContractConfigured, VERIFIED_DEPLOYMENT } from '../config/network';
+import type { FeesDistributionInput } from 'genlayer-js/types';
+import {
+  NETWORK_CONFIG,
+  isContractConfigured,
+  LEGACY_FUNDED_ROUND,
+  isLockedRecoveryRound,
+  isLegacyUnpatchableRound,
+  legacyAiVoteWriteBlock,
+} from '../config/network';
+import {
+  allocationBudgetWei,
+  allocationIncludesRecipient,
+  assertSealedWithdrawReady,
+  resolveWithdrawFeeSimulation,
+  sealNativeTransfer,
+  sealedAllocations,
+  submitWithdrawWithAllocations,
+  type SealedNativeTransfer,
+  type WithdrawFeeSimulation,
+} from './nativeTransferFees';
 import { GENLAYER_STUDIO_NEXT } from '../context/WalletContext';
 import { type DataAccessAdapter } from './dataAccess';
 import { expectedEffectForAction } from './permissions';
@@ -114,6 +133,28 @@ export interface PreparedTransaction {
     requested_amount_wei: bigint;
     deliverables_text: string;
   };
+  createRoundExpected?: {
+    title: string;
+    description: string;
+    committee: string[];
+    grantCapWei: bigint;
+    initialDepositWei: bigint;
+    nominationCutoff: number;
+    votingDuration: number;
+    roundEnd: number;
+    charterText?: string;
+    approval?: {
+      plannedRecipient: string;
+      recipientOnRoster: boolean;
+      rosterSize: number;
+      eligibleVoters: string[];
+      eligibleCount: number;
+      requiredYes: number;
+      formula: string;
+    };
+  };
+  withdrawRecipient?: string;
+  nativeTransfer?: SealedNativeTransfer;
 }
 
 export interface StorageState {
@@ -428,6 +469,20 @@ export function getInFlightTransaction(compositeTargetKey: string): PersistedTx 
   );
 }
 
+/** A finalized error may be retried only through a new quote after a fresh state read. Every other recorded attempt blocks another submit. */
+export function recordedActionBlocksResubmit(action: ActionType, proposalId: string): PersistedTx | null {
+  const matches = [
+    ...getInMemoryBlockingMarkers(),
+    ...getPersistedTransactions(),
+  ].filter(
+    (tx) =>
+      tx.action === action &&
+      tx.proposalId === proposalId &&
+      tx.status !== 'finalized-error'
+  );
+  return matches.find((tx) => tx.txId) ?? matches[0] ?? null;
+}
+
 export function getInFlightTransactionForTarget(targetIdentifier: string): PersistedTx | null {
   // Check in-memory session markers
   for (const marker of inMemoryBlockingMarkers.values()) {
@@ -509,7 +564,7 @@ export function serializeSubmitInput(input: SubmitInput): string {
   );
 }
 
-export const RECOVERY_ROUND_ID = VERIFIED_DEPLOYMENT.intendedRoundId;
+export const RECOVERY_ROUND_ID = LEGACY_FUNDED_ROUND.pilotRoundId;
 
 export function parseBlockTimestampSeconds(block: unknown): number {
   const raw = (block as { timestamp?: string | number } | null)?.timestamp;
@@ -529,9 +584,9 @@ export function assertNominationWindowOpen(params: {
   roundId: string;
 }): { chainTimeSec: string; nominationCutoffSec: string; roundId: string } {
   const rid = String(params.roundId || '');
-  if (rid.toLowerCase() === RECOVERY_ROUND_ID.toLowerCase()) {
+  if (isLockedRecoveryRound(rid)) {
     const err = new Error(
-      `RECOVERY_ROUND_NOMINATION_FORBIDDEN: ${RECOVERY_ROUND_ID} is a locked recovery/refund case. Nomination is forbidden.`
+      `RECOVERY_ROUND_NOMINATION_FORBIDDEN: ${rid} is a locked recovery/refund case. Nomination is forbidden.`
     );
     (err as Error & { code?: string }).code = 'RECOVERY_ROUND_NOMINATION_FORBIDDEN';
     throw err;
@@ -589,6 +644,15 @@ export interface PrepareActionParams {
     voting_duration: number;
     round_end: number;
     initial_deposit_wei: bigint;
+    approval?: {
+      plannedRecipient: string;
+      recipientOnRoster: boolean;
+      rosterSize: number;
+      eligibleVoters: string[];
+      eligibleCount: number;
+      requiredYes: number;
+      formula: string;
+    };
   };
   nominateProposalArgs?: {
     round_id: string;
@@ -608,10 +672,119 @@ export interface PrepareActionParams {
   };
 }
 
+export async function readProposalForWriteGuard(
+  adapter: DataAccessAdapter | undefined,
+  proposalId: string,
+  actionLabel: string
+): Promise<Proposal> {
+  if (!adapter) {
+    throw new Error(`${actionLabel}_STATE_READ_FAILED: a live proposal read is required before this write. Submission blocked.`);
+  }
+  let proposal: Proposal | null;
+  try {
+    proposal = await adapter.getProposalById(proposalId);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Read error';
+    throw new Error(
+      `${actionLabel}_STATE_READ_FAILED: get_proposal(${proposalId}) failed: ${message}. Submission blocked.`
+    );
+  }
+  if (!proposal) {
+    throw new Error(`${actionLabel}_STATE_READ_FAILED: proposal "${proposalId}" was not returned. Submission blocked.`);
+  }
+  return proposal;
+}
+
+export async function assertEvaluationStillSubmitted(
+  adapter: DataAccessAdapter | undefined,
+  proposalId: string | undefined
+): Promise<void> {
+  if (!proposalId) {
+    throw new Error('EVALUATION_STATE_READ_FAILED: missing proposal id. Submission blocked.');
+  }
+  const proposal = await readProposalForWriteGuard(adapter, proposalId, 'EVALUATION');
+  if (proposal.status !== 'SUBMITTED') {
+    throw new Error(
+      `EVALUATION_STATE_CHANGED: proposal "${proposalId}" is ${proposal.status}, not SUBMITTED. Duplicate evaluation is blocked.`
+    );
+  }
+}
+
+export async function assertVoteStillOpen(
+  adapter: DataAccessAdapter | undefined,
+  account: string,
+  proposalId: string | undefined
+): Promise<void> {
+  if (!proposalId) {
+    throw new Error('VOTE_STATE_READ_FAILED: missing proposal id. Submission blocked.');
+  }
+  const proposal = await readProposalForWriteGuard(adapter, proposalId, 'VOTE');
+  if (proposal.status !== 'ELIGIBLE' && proposal.status !== 'VOTING') {
+    throw new Error(
+      `VOTE_STATE_CHANGED: proposal "${proposalId}" is ${proposal.status}. Voting is closed.`
+    );
+  }
+  if (proposal.recipientAddress && proposal.recipientAddress.toLowerCase() === account.toLowerCase()) {
+    throw new Error('Recipient recusal: proposal recipient cannot vote on their own proposal.');
+  }
+  const alreadyVoted = proposal.eventLog?.some(
+    (entry) => entry.voterNode?.toLowerCase() === account.toLowerCase()
+  );
+  if (alreadyVoted) {
+    throw new Error(
+      `ALREADY_VOTED: ${account} already has a recorded ballot on "${proposalId}". Duplicate vote is blocked.`
+    );
+  }
+}
+
+export async function assertWithdrawStillApproved(
+  adapter: DataAccessAdapter | undefined,
+  account: string,
+  proposalId: string | undefined
+): Promise<Proposal> {
+  if (!proposalId) {
+    throw new Error('WITHDRAW_STATE_READ_FAILED: missing proposal id. Submission blocked.');
+  }
+  const proposal = await readProposalForWriteGuard(adapter, proposalId, 'WITHDRAW');
+  if (proposal.status === 'PAYOUT_EMITTED') {
+    throw new Error(
+      `WITHDRAW_STATE_CHANGED: proposal "${proposalId}" is PAYOUT_EMITTED. Duplicate withdrawal is blocked.`
+    );
+  }
+  if (proposal.status !== 'APPROVED') {
+    throw new Error(
+      `WITHDRAW_STATE_CHANGED: proposal "${proposalId}" is ${proposal.status}, not APPROVED.`
+    );
+  }
+  if (!proposal.recipientAddress || proposal.recipientAddress.toLowerCase() !== account.toLowerCase()) {
+    throw new Error(
+      `WITHDRAW_RECIPIENT_MISMATCH: ${account} is not the named recipient of "${proposalId}".`
+    );
+  }
+  return proposal;
+}
+
 export async function prepareActionTransaction(
   params: PrepareActionParams
 ): Promise<PreparedTransaction> {
   const { action, provider, account, chainId, adapter } = params;
+
+  if (action === 'evaluate_charter_fit' || action === 'cast_vote') {
+    const legacyBlock = legacyAiVoteWriteBlock({
+      contractAddress: params.contractAddress || NETWORK_CONFIG.contractAddress,
+      roundId: params.roundId,
+      proposalId: params.proposalId || params.castVoteArgs?.proposal_id,
+    });
+    if (legacyBlock) {
+      throw new Error(legacyBlock);
+    }
+  }
+  const nominateRoundId = params.roundId || params.nominateProposalArgs?.round_id;
+  if (action === 'nominate_proposal' && isLegacyUnpatchableRound(nominateRoundId)) {
+    throw new Error(
+      'WRITE BLOCKED: nomination into legacy contract 0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48 is closed. The round stays visible for recovery only.'
+    );
+  }
 
   // 1. Check persistence works before permitting wallet preparation
   const storageCheck = verifyStoragePersistenceWritable();
@@ -709,6 +882,7 @@ export async function prepareActionTransaction(
   let payableValueWei = 0n;
   let preBroadcastProposalIds: string[] | undefined;
   let preparedNominateArgs: PreparedTransaction['nominateArgs'] | undefined;
+  let withdrawRecipient: string | undefined;
 
   switch (action) {
     case 'create_round': {
@@ -764,9 +938,9 @@ export async function prepareActionTransaction(
         throw new Error('DataAccessAdapter is required to capture pre-broadcast proposal snapshot for nomination attribution.');
       }
 
-      if (args.round_id.toLowerCase() === RECOVERY_ROUND_ID.toLowerCase()) {
+      if (isLockedRecoveryRound(args.round_id)) {
         throw new Error(
-          `RECOVERY_ROUND_NOMINATION_FORBIDDEN: ${RECOVERY_ROUND_ID} is a locked recovery/refund case. Nomination is forbidden.`
+          `RECOVERY_ROUND_NOMINATION_FORBIDDEN: ${args.round_id} is a locked recovery/refund case. Nomination is forbidden.`
         );
       }
 
@@ -851,6 +1025,7 @@ export async function prepareActionTransaction(
 
     case 'evaluate_charter_fit': {
       if (!params.proposalId) throw new Error('Missing proposalId for evaluate_charter_fit');
+      await assertEvaluationStillSubmitted(adapter, params.proposalId);
       submitInput = {
         kind: 'write',
         address: contractAddr,
@@ -871,6 +1046,7 @@ export async function prepareActionTransaction(
       if (args.recipientAddress && args.recipientAddress.toLowerCase() === account.toLowerCase()) {
         throw new Error('Recipient recusal: proposal recipient cannot vote on their own proposal.');
       }
+      await assertVoteStillOpen(adapter, account, args.proposal_id);
       submitInput = {
         kind: 'write',
         address: contractAddr,
@@ -896,6 +1072,8 @@ export async function prepareActionTransaction(
 
     case 'withdraw_credit': {
       if (!params.proposalId) throw new Error('Missing proposalId for withdraw_credit');
+      const liveProposal = await assertWithdrawStillApproved(adapter, account, params.proposalId);
+      withdrawRecipient = liveProposal.recipientAddress.toLowerCase();
       submitInput = {
         kind: 'write',
         address: contractAddr,
@@ -931,12 +1109,31 @@ export async function prepareActionTransaction(
       throw new Error(`Unsupported action type: ${action}`);
   }
 
-  // 7. Estimate fees using network-default quoting
+  // 7. Estimate fees using network-default quoting.
+  // withdraw_credit first asks Studio Next for this exact call's fee tree.
+  // RC2's ordinary estimate reports zero message fees and its submit omits allocations.
+  let withdrawSimulation: WithdrawFeeSimulation | null = null;
+  if (action === 'withdraw_credit' && submitInput.kind === 'write') {
+    withdrawSimulation = await resolveWithdrawFeeSimulation(
+      {
+        chain: getStudioDevnetChain(),
+        provider,
+        account: account as `0x${string}`,
+        address: contractAddr,
+        proposalId: carriedProposalId || '',
+        value: payableValueWei,
+      },
+      { kitOverridden: kitFactoryOverride !== null }
+    );
+  }
   const kit = getTransactionKitInstance(provider, account as `0x${string}`);
   const quote = await kit.estimate(
     {
       preset: 'standard',
       userValue: payableValueWei,
+      ...(withdrawSimulation
+        ? { overrides: { ...withdrawSimulation.distribution } as Partial<FeesDistributionInput> }
+        : {}),
     },
     submitInput
   );
@@ -952,15 +1149,49 @@ export async function prepareActionTransaction(
       'Fee policy mismatch detected: live chain fee price caps do not match the quoted distribution hash. Action is blocked to prevent gas loss or stale execution.';
   }
 
+  if (action === 'withdraw_credit' && withdrawSimulation) {
+    const allocations = withdrawSimulation.messageAllocations ?? [];
+    if (!allocations.length) {
+      isBlocked = true;
+      blockReason =
+        'Submission disabled: Studio Next did not return a native-transfer fee allocation. No transaction was submitted.';
+    } else if (!withdrawRecipient || !allocationIncludesRecipient(allocations, withdrawRecipient)) {
+      isBlocked = true;
+      blockReason =
+        'Submission disabled: the simulated native-transfer allocation does not match the named recipient. No transaction was submitted.';
+    } else {
+      const required = allocationBudgetWei(allocations);
+      if (quote.distribution.totalMessageFees < required || quote.feeValue < withdrawSimulation.feeValue) {
+        isBlocked = true;
+        blockReason =
+          "The payout fee quote is below Studio Next's simulated requirement. Re-estimate before signing.";
+      }
+    }
+  }
+
   // Message-emitting actions require a fresh positive native-message fee estimate.
+  // A positive number is never substituted for a zero or missing measurement.
   if (action === 'withdraw_credit' || action === 'claim_creator_refund') {
     const messageFees = quote.breakdown?.messageFees;
     if (messageFees === undefined || messageFees === null || BigInt(messageFees) <= 0n) {
       isBlocked = true;
-      blockReason =
-        'Submission disabled: emit_transfer requires a fresh positive native-message fee estimate (quote.breakdown.messageFees > 0). UI gating is guidance; the contract is authoritative.';
+      if (!blockReason) {
+        blockReason =
+          'Submission disabled: emit_transfer requires a fresh positive native-message fee estimate (quote.breakdown.messageFees > 0). UI gating is guidance; the contract is authoritative.';
+      }
     }
   }
+
+  const nativeTransfer =
+    action === 'withdraw_credit' && withdrawSimulation && !isBlocked && carriedProposalId
+      ? sealNativeTransfer({
+          account,
+          proposalId: carriedProposalId,
+          contractAddress: contractAddr,
+          argsJson: serializeSubmitInput(submitInput),
+          simulation: withdrawSimulation,
+        })
+      : undefined;
 
   return {
     action,
@@ -983,6 +1214,23 @@ export async function prepareActionTransaction(
     quotedAt: Date.now(),
     preBroadcastProposalIds,
     nominateArgs: preparedNominateArgs,
+    createRoundExpected:
+      action === 'create_round' && params.createRoundArgs
+        ? {
+            title: params.createRoundArgs.title,
+            description: params.createRoundArgs.description,
+            committee: [...params.createRoundArgs.committee_roster],
+            grantCapWei: params.createRoundArgs.grant_cap_wei,
+            initialDepositWei: params.createRoundArgs.initial_deposit_wei,
+            nominationCutoff: params.createRoundArgs.nomination_cutoff,
+            votingDuration: params.createRoundArgs.voting_duration,
+            roundEnd: params.createRoundArgs.round_end,
+            charterText: params.createRoundArgs.charter_text,
+            approval: params.createRoundArgs.approval,
+          }
+        : undefined,
+    withdrawRecipient,
+    nativeTransfer,
   };
 }
 
@@ -1100,6 +1348,7 @@ export interface ExecuteTransactionCallbacks {
   onStatusUpdate?: (status: TrackedStatus) => void;
   onSubmitted?: (txId: `0x${string}`, evmTxHash?: `0x${string}`) => void;
   onPersistenceFailure?: (txId: `0x${string}`, error?: string) => void;
+  adapter?: DataAccessAdapter;
 }
 
 export async function executeAndTrackTransaction(
@@ -1224,16 +1473,65 @@ export async function executeAndTrackTransaction(
   if (prepared.action === 'nominate_proposal' && (!prepared.preBroadcastProposalIds || !prepared.nominateArgs)) {
     throw new Error('Nomination intent is missing pre-broadcast proposal snapshot. Please request a fresh quote.');
   }
+  if (prepared.action === 'evaluate_charter_fit') {
+    await assertEvaluationStillSubmitted(callbacks?.adapter, prepared.proposalId);
+  }
+  if (prepared.action === 'cast_vote') {
+    await assertVoteStillOpen(callbacks?.adapter, account, prepared.proposalId);
+  }
+  if (prepared.action === 'withdraw_credit') {
+    await assertWithdrawStillApproved(callbacks?.adapter, account, prepared.proposalId);
+    assertSealedWithdrawReady({
+      seal: prepared.nativeTransfer,
+      account,
+      proposalId: prepared.proposalId,
+      contractAddress: prepared.quotedContractAddress,
+      argsJson: serializeSubmitInput(prepared.submitInput),
+      payableValueWei: prepared.payableValueWei,
+      quoteUserValue: prepared.quote.userValue,
+      quoteFeeValue: prepared.quote.feeValue,
+      quoteTotalMessageFees: prepared.quote.distribution.totalMessageFees,
+      quoteMessageFees: prepared.quote.breakdown?.messageFees,
+    });
+  }
     kit = getTransactionKitInstance(provider, account as `0x${string}`);
   } catch (preBroadcastErr) {
     releasePreBroadcastReservation(initialIntentRecord);
     throw preBroadcastErr;
   }
 
-  // Submit via Transaction Kit
+  // Submit via Transaction Kit. withdraw_credit uses the wallet provider's
+  // writeContract so the sealed messageAllocations are part of the signed payload.
   let submitResult: { genlayerTxId?: `0x${string}`; evmTxHash?: `0x${string}` };
   try {
-    submitResult = await kit.submit(prepared.quote, prepared.submitInput);
+    if (prepared.action === 'withdraw_credit') {
+      const seal = prepared.nativeTransfer;
+      if (!seal || prepared.submitInput.kind !== 'write') {
+        throw new Error('The native-transfer fee allocation is missing or stale. Re-estimate before signing.');
+      }
+      const callArgs = prepared.submitInput.args ?? [];
+      submitResult = await submitWithdrawWithAllocations(
+        {
+          address: prepared.submitInput.address,
+          functionName: 'withdraw_credit',
+          args: [String(callArgs[0] ?? '')],
+          value: prepared.quote.userValue,
+          account: account as `0x${string}`,
+          fees: {
+            distribution: prepared.quote.distribution,
+            feeValue: prepared.quote.feeValue,
+            messageAllocations: sealedAllocations(seal),
+          },
+        },
+        {
+          chain: getStudioDevnetChain(),
+          provider,
+          refuseLiveSubmit: kitFactoryOverride !== null,
+        }
+      );
+    } else {
+      submitResult = await kit.submit(prepared.quote, prepared.submitInput);
+    }
   } catch (submitErr: any) {
     // If submit throws after a possible broadcast, retain the intent as broadcast-unknown
     // and block duplicate writes after reload. Never delete it!
@@ -1519,6 +1817,72 @@ export interface PostStateVerificationContext {
   };
   preBroadcastProposalIds?: string[];
   roundId?: string;
+  createRoundExpected?: {
+    title: string;
+    description: string;
+    committee: string[];
+    grantCapWei: bigint;
+    initialDepositWei: bigint;
+    nominationCutoff?: number;
+    votingDuration?: number;
+    roundEnd?: number;
+    charterText?: string;
+    approval?: {
+      plannedRecipient: string;
+      recipientOnRoster: boolean;
+      rosterSize: number;
+      eligibleVoters: string[];
+      eligibleCount: number;
+      requiredYes: number;
+      formula: string;
+    };
+  };
+  contractBalanceWei?: bigint | null;
+}
+
+function weiToGenFromExpected(wei: bigint): number {
+  const whole = wei / 10n ** 18n;
+  const fraction = wei % 10n ** 18n;
+  return Number(whole) + Number(fraction) / 1e18;
+}
+
+export function readbackUncertainFromError(err: unknown): { verified: false; message: string } {
+  const message = String((err as { message?: string })?.message || err || 'Post-success readback failed.');
+  return { verified: false, message };
+}
+
+/**
+ * A finalized success must stay a success when the follow-up read throws.
+ * The receipt and hash are preserved. The caller retries the read only.
+ */
+export function presentPostSuccessException(
+  persisted: { status: PersistedTxStatus; txId?: string },
+  err: unknown
+): {
+  preserveReceipt: boolean;
+  errorMsg: string | null;
+  banner: 'FINALIZED, READBACK UNCERTAIN' | null;
+  showRetry: boolean;
+  txId?: string;
+  verification: { verified: false; message: string } | null;
+} {
+  if (persisted.status === 'finalized-success' && persisted.txId) {
+    return {
+      preserveReceipt: true,
+      errorMsg: null,
+      banner: 'FINALIZED, READBACK UNCERTAIN',
+      showRetry: true,
+      txId: persisted.txId,
+      verification: readbackUncertainFromError(err),
+    };
+  }
+  return {
+    preserveReceipt: false,
+    errorMsg: String((err as { message?: string })?.message || err || 'Transaction submission failed.'),
+    banner: null,
+    showRetry: false,
+    verification: null,
+  };
 }
 
 /**
@@ -1534,7 +1898,15 @@ export async function verifyIntendedStateAfterSuccess(
 ): Promise<{ verified: boolean; message: string; correlatedProposalId?: string }> {
   switch (action) {
     case 'create_round': {
-      const round = await adapter.getRoundById(targetId);
+      let round: Awaited<ReturnType<DataAccessAdapter['getRoundById']>>;
+      try {
+        round = await adapter.getRoundById(targetId);
+      } catch (err: unknown) {
+        return {
+          verified: false,
+          message: `Readback failed for "${targetId}": ${readbackUncertainFromError(err).message}`,
+        };
+      }
       if (!round) {
         return { verified: false, message: `Round "${targetId}" not found in contract storage.` };
       }
@@ -1549,6 +1921,103 @@ export async function verifyIntendedStateAfterSuccess(
           verified: false,
           message: `Creator address mismatch: expected ${expectedCaller}, got ${round.creatorAddress}.`,
         };
+      }
+      const expected = context?.createRoundExpected;
+      if (expected) {
+        if (round.title.trim() !== expected.title.trim()) {
+          return { verified: false, message: `Round title mismatch for "${targetId}".` };
+        }
+        if (round.summary.trim() !== expected.description.trim()) {
+          return { verified: false, message: `Round description mismatch for "${targetId}".` };
+        }
+        const onChainCommittee = (round.committeeMembers || []).map((member) => member.address.toLowerCase());
+        const intendedCommittee = expected.committee.map((addr) => addr.toLowerCase());
+        const rosterOrderMatches =
+          onChainCommittee.length === intendedCommittee.length &&
+          onChainCommittee.every((addr, index) => addr === intendedCommittee[index]);
+        if (!rosterOrderMatches) {
+          return {
+            verified: false,
+            message: `Committee roster order mismatch for "${targetId}": expected ${intendedCommittee.join(',')}, found ${onChainCommittee.join(',')}.`,
+          };
+        }
+        if (expected.charterText) {
+          const onChainCharter = round.charterRules?.[0]?.description || '';
+          if (onChainCharter !== expected.charterText) {
+            return { verified: false, message: `Charter mismatch for "${targetId}".` };
+          }
+        }
+        if (
+          expected.nominationCutoff !== undefined &&
+          round.nominationCutoffUnix !== undefined &&
+          round.nominationCutoffUnix !== expected.nominationCutoff
+        ) {
+          return { verified: false, message: `Nomination cutoff mismatch for "${targetId}".` };
+        }
+        if (
+          expected.votingDuration !== undefined &&
+          round.votingDurationSec !== undefined &&
+          round.votingDurationSec !== expected.votingDuration
+        ) {
+          return { verified: false, message: `Voting duration mismatch for "${targetId}".` };
+        }
+        if (expected.roundEnd !== undefined && round.roundEndUnix !== undefined && round.roundEndUnix !== expected.roundEnd) {
+          return { verified: false, message: `Round end mismatch for "${targetId}".` };
+        }
+        const expectedDepositGen = weiToGenFromExpected(expected.initialDepositWei);
+        const expectedCapGen = weiToGenFromExpected(expected.grantCapWei);
+        if (Math.abs(round.totalPoolGen - expectedDepositGen) > 1e-9) {
+          return {
+            verified: false,
+            message: `Genesis ledger mismatch for "${targetId}": expected ${expectedDepositGen} GEN deposit, found ${round.totalPoolGen}.`,
+          };
+        }
+        if (Math.abs(round.capPerProposalGen - expectedCapGen) > 1e-9) {
+          return {
+            verified: false,
+            message: `Grant cap mismatch for "${targetId}".`,
+          };
+        }
+        if (Math.abs(round.availableGen - expectedDepositGen) > 1e-9) {
+          return {
+            verified: false,
+            message: `Genesis available balance mismatch for "${targetId}": expected ${expectedDepositGen} GEN, found ${round.availableGen}.`,
+          };
+        }
+        if (Math.abs(round.reservedGen) > 1e-9 || Math.abs(round.approvedGen) > 1e-9 || Math.abs(round.withdrawnGen) > 1e-9) {
+          return {
+            verified: false,
+            message: `Genesis ledger for "${targetId}" is not zero-allocation: reserved ${round.reservedGen}, approved ${round.approvedGen}, withdrawn ${round.withdrawnGen}.`,
+          };
+        }
+      }
+      if (typeof adapter.getRounds === 'function') {
+        try {
+          const listed = await adapter.getRounds();
+          if (!listed.some((item) => item.id === targetId)) {
+            return {
+              verified: false,
+              message: `Round "${targetId}" is missing from the on-chain registry listing.`,
+            };
+          }
+        } catch (err: unknown) {
+          return {
+            verified: false,
+            message: `Registry listing failed after create_round: ${String((err as { message?: string })?.message || err)}`,
+          };
+        }
+      }
+      if (context && 'contractBalanceWei' in context) {
+        if (context.contractBalanceWei == null) {
+          return { verified: false, message: 'Contract native balance could not be read after create_round.' };
+        }
+        const minDeposit = expected?.initialDepositWei ?? 10n ** 18n;
+        if (context.contractBalanceWei < minDeposit) {
+          return {
+            verified: false,
+            message: `Contract balance ${context.contractBalanceWei} wei is below the genesis deposit.`,
+          };
+        }
       }
       return { verified: true, message: `Round "${targetId}" verified ACTIVE on Chain 61997.` };
     }

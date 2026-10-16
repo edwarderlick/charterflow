@@ -1,97 +1,119 @@
 # CharterFlow
 
-CharterFlow is a charter-bound grant coordination protocol for the GenLayer Intelligent VM (Studio Next, chain ID `61997`). A creator deposits native GEN into an isolated round, freezes a natural-language charter, and names a committee. Independent validators return a categorical charter-fit verdict. Eligible members vote with recipient recusal and a 2/3 ceiling quorum. Recipients pull approved credits; the contract emits a native transfer. Creator leftovers close through a refund claim.
+CharterFlow is a grant round on a GenLayer intelligent contract. A creator locks a natural-language charter and a GEN deposit. A committee nominates work. GenLayer validators return one categorical charter-fit verdict. Eligible members vote, with the recipient recused. The recipient withdraws an approved credit, and the contract emits the native transfer.
 
-This repository is **not** an end-to-end working on-chain pilot. Stage 2 readback is **INCONCLUSIVE**. See `docs/PUBLIC_EVIDENCE.md` and `docs/PROJECT_COPY.md`.
+The charter check matters because the verdict is produced inside the contract, not pasted in from an off-chain review. The leader and validators must agree on the category. The stored reason records that agreement and states that a free-text rationale was not verified. A disagreement leaves the proposal unmoved.
 
-## Current blocked state
+**Public demo:** not deployed. Connect this repository to Vercel, then replace this sentence with that deployment URL.
 
-- **Contract source:** `contracts/CharterFlowCore.py` SHA-256 `34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee` (must stay byte-identical with the deployed source).
-- **Deployed contract:** `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21` (tx `0xc5c220571c8d890c04715ce65cfd23ae92a0d49e696c596979591f771ab734e4`).
-- **Finalized `create_round`:** `0x1476320746c0efda5f97d2db6256c571c6da7adff7c494af33031bf9adfb0bdc` is `FINALIZED` / `FINISHED_WITH_RETURN` with value `1e18` wei. Intended round `rnd-pilot-354517` and its 1 GEN genesis ledger are **unverified**. That round is a locked recovery/refund case; do not nominate into it.
-- **Studio Next `gen_call`:** contract views fail JSON-RPC `-32603` rollback on both CharterFlow and an independently confirmed PaymentSpike control. `eth_*` reads succeed.
-- **No Stage 3+ writes** have been sent. Do not redeploy, resend `create_round`, or fund accounts from a public checkout.
-- **Builder Portal:** not submitted. `docs/PORTAL_SUBMISSION_CHECKLIST.md`.
+**Contract:** [`0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`](https://explorer-studio-dev.genlayer.com/address/0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8)
 
-## Network
+**Network:** GenLayer Studio development preview, chain ID `61997` (`0xf22d`). RPC `https://studio-next.genlayer.com/api`. Explorer `https://explorer-studio-dev.genlayer.com`. Source SHA-256 `4b146292c840cf16e0dcfd7b8d488492092d73c2c3160dda366f922642eaee78` (`contracts/CharterFlowCore.py`, also served at `frontend/public/CharterFlowCore.py`).
 
-| Item | Value |
-|---|---|
-| Network | GenLayer Studio Next |
-| Chain ID | `61997` (`0xf22d`) |
-| RPC | `https://studio-next.genlayer.com/api` |
-| Explorer base | `https://explorer-studio-dev.genlayer.com/` |
+This network is a development preview. Its state can be reset. This repository does not claim that a GenLayer Portal mission accepts chain `61997`. Check that mission's rules before submitting. Builder Portal is not submitted from here.
 
-## Architecture and safety limits
+A fresh read at `2026-10-16T21:58:07.162Z` is summarized in [`docs/evidence/verified-flow.json`](docs/evidence/verified-flow.json).
 
-1. One multi-round contract with isolated ledgers (`available_wei`, `reserved_wei`, `approved_credits_wei`, `creator_claimable_wei`, `payouts_emitted_wei`, `refunds_emitted_wei`).
-2. Charter review uses `gl.vm.run_nondet_unsafe` on a categorical verdict only. Stored reasons state that semantic rationale was not verified. Invalid JSON fails closed to `NEEDS_CLARITY`.
-3. Voting quorum is `(N * 2 + 2) // 3`. Recipients on the committee are recused.
-4. Payouts are pull-based `withdraw_credit()` → `_Recipient(address).emit_transfer(value=...)`. Truthful state is `PAYOUT_EMITTED`, not independently proven delivery.
-5. The runner is fail-closed: a receipt, nonce, registry row, or balance change alone is not Stage 2 proof. Write modes require the operator-held local checkpoint (`docs/LOCAL_CHECKPOINT.md`). A missing checkpoint does **not** start a new funded pilot.
+## Verified flow
 
-## Fresh checkout
+Round `round-open-source-rpc--mvb7nltc`. Proposal `prp-round-open-source-rpc--mvb7nltc-1`. The round started with 1 GEN. It paid 0.05 GEN. At the read above, the contract balance was `950000000000000000` wei (0.95 GEN).
 
-Node 18+ and npm. Python 3.12+ plus GenLayer `gltest` **v0.6.0-rc8** are required only for contract unit tests.
+| Step | What it shows | Transaction |
+|---|---|---|
+| Deploy | Contract created, `FINALIZED` / `FINISHED_WITH_RETURN` | [`0x700b…da6c`](https://explorer-studio-dev.genlayer.com/tx/0x700b462e4620bf849b873af0e515357d08e905aa03a3682d5abb06d58f80da6c) |
+| Create round | 1 GEN deposit from the creator | [`0x753a…d8d0`](https://explorer-studio-dev.genlayer.com/tx/0x753a915e0a882d403d0338a04ae4c9569e34eeb04afbd7b275b09c28128dd8d0) |
+| Nominate | 0.05 GEN proposal for the recipient | [`0x220c…e482`](https://explorer-studio-dev.genlayer.com/tx/0x220c4ef78af5f055e11bf1d00cdafbc1bd17dd16943c214713a6643d53c4e482) |
+| AI review | Two finalized calls of the same method. One stored verdict: `ELIGIBLE` | [`0x1213…62c3`](https://explorer-studio-dev.genlayer.com/tx/0x121377a431bc73fde4595abbe22108fe07070ebcffe48ab5fb899cf6dde362c3), [`0x06e6…11bc`](https://explorer-studio-dev.genlayer.com/tx/0x06e6aad2a144b0dc139817cf9aecfd184ceb3d05c75c67a098d7cf2c56b811bc) |
+| YES vote | Creator vote. Not a withdrawal | [`0x899a…4526`](https://explorer-studio-dev.genlayer.com/tx/0x899a922020fde7f680e39812df9d344d04f1c5702f71099e9648d528f3684526) |
+| Withdraw | Recipient `withdraw_credit`, `FINALIZED` / `FINISHED_WITH_RETURN` | [`0x0f29…2c6a`](https://explorer-studio-dev.genlayer.com/tx/0x0f29c0f7523d74aa89d8e93cbb995c19d69191052ea8e1893de3656fec032c6a) |
+| Child transfer | 0.05 GEN from the contract to `0x31e14df3b4f47F2428F3B78E7279691A78f70a05`, `triggered_by` the withdraw | [`0x6e01…d6f0`](https://explorer-studio-dev.genlayer.com/tx/0x6e012d41c822b321271b194318121a240681d4568087d06a63ffb4e882b6d6f0) |
+
+The two review hashes are both `evaluate_charter_fit` for this proposal from `0xb3F7518df619ef485f7a1568ED3705bB6f5B0407` (nonces 13 and 14). Both are `FINALIZED` / `FINISHED_WITH_RETURN`. The contract keeps one verdict, `ELIGIBLE`, with reason `VALIDATOR_AGREED_VERDICT_ELIGIBLE; SEMANTIC_RATIONALE_NOT_VERIFIED`. The second call is not a second required review stage.
+
+The child transfer is `FINALIZED` with execution result `NOT_VOTED`. That label fits a native transfer rather than a voted contract call. `value_credited` was true, value `50000000000000000` wei, sender the contract, recipient `0x31e14df3b4f47F2428F3B78E7279691A78f70a05`, and `triggered_by` the withdraw hash.
+
+## How a round works
+
+1. **Immutable charter.** `create_round` stores the charter with the deposit, the committee, the grant cap, and the deadlines. Later calls do not edit that text.
+2. **Committee and recusal.** Only a roster address may nominate or vote. A recipient who is also on the roster cannot vote on their own proposal. This round's roster is the creator `0xb3F7518df619ef485f7a1568ED3705bB6f5B0407` and the recipient `0x31e14df3b4f47F2428F3B78E7279691A78f70a05`. After recusal, one YES from the creator met the quorum. The recorded vote list contains only the creator.
+3. **Nomination.** A committee member names the recipient, title, deliverables, and an amount within the grant cap. This proposal asked for `50000000000000000` wei (0.05 GEN).
+4. **AI eligibility review.** `evaluate_charter_fit` asks the GenLayer validators for one categorical verdict. The stored result is `ELIGIBLE`.
+5. **Vote.** `cast_vote` records YES or NO. The YES hash above is the creator's ballot.
+6. **Escrow.** The round began with `1000000000000000000` wei available. At the read, `payouts_emitted_wei` was `50000000000000000`, `available_wei` was `950000000000000000`, and reserved, approved, refunded, and creator-claimable balances were 0. The contract balance matched the 0.95 GEN still in the round.
+7. **Recipient withdrawal.** The recipient calls `withdraw_credit`. The parent transaction is the contract call. Delivery is the separate child transfer above. The proposal state at the read was `PAYOUT_EMITTED` and `credit_withdrawn` was true.
+
+## Not done: close and refund
+
+Creator close and creator refund have not happened. There is no close hash and no refund hash. `refunds_emitted_wei` and `creator_claimable_wei` were 0. The round state was still `ACTIVE`.
+
+Round end is `2026-10-27T16:53:52Z` (`1793120032`). `close_round_and_refund` can be tested only when the contract's own conditions are met after that time, including `reserved_wei` of 0. `claim_creator_refund` comes after a successful close. Do not treat the paid 0.05 GEN, or the remaining 0.95 GEN, as recovered by the creator.
+
+## Local setup
+
+Node.js 22 and npm. Python 3.12 and GenLayer `gltest` are needed only for `npm run test:contracts`.
 
 ```bash
 npm ci
 npm --prefix frontend ci
-npm run test:safety
-npm run test:frontend-reads
-npm run test:frontend-writes
-npm run test:wallet-steward
-npm run build:frontend
-npm run lint:frontend
-pytest tests/test_charterflow_core.py
-```
-
-Root `.env.example` and `frontend/.env.example` contain public RPC/chain/contract values only. Copy them if you need local env files. Credentials stay in the OS credential manager via `keytar`. Never commit `.env`, keystores, or `scripts/pilot_evidence.json`.
-
-Frontend defaults (overridable with `VITE_*`):
-
-- `VITE_RPC_URL=https://studio-next.genlayer.com/api`
-- `VITE_EXPLORER_URL=https://explorer-studio-dev.genlayer.com`
-- `VITE_CONTRACT_ADDRESS=0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`
-
-```bash
 cd frontend
 npm run dev
 ```
 
-Local app: `http://localhost:5173/` — checklist: `docs/LOCAL_WALKTHROUGH.md`. Live mode currently shows Studio Next `gen_call` `-32603` errors. Do not treat design-preview fixtures as chain evidence.
+The dev server prints its URL, usually `http://127.0.0.1:5173/`. Another app may already own that port. CharterFlow has also been run with `npx vite --host 127.0.0.1 --port 5174 --strictPort` from `frontend/`.
 
-## Test CharterFlow (stewards)
+Copy `.env.example` and `frontend/.env.example` only if you want local env files. They contain public RPC and contract values. Do not commit a `.env`. The app never asks for a seed phrase or private key. Operator scripts that use `keytar` are not part of the public demo path.
 
-In-app guide: `http://localhost:5173/test`. You do **not** need a wallet or test GEN to inspect the project.
+Wallet: any injected EIP-1193 wallet on chain `61997`. The app will not switch networks or sign by itself. Studio development preview test GEN comes from the Studio faucet, not from the Asimov faucet on chain `4221`.
 
-1. **Wallet-free browsing.** Leave DESIGN PREVIEW off. Open `/rounds`, `/rounds/rnd-pilot-354517`, or a proposal URL. Public reads use the Studio Next RPC. A failed `gen_call` must show a **read error**, never “no rounds” or fixture grants.
-2. **Connect your own injected EIP-1193 wallet.** The app uses `eth_requestAccounts` and EIP-6963 when several wallets are injected. It does not claim WalletConnect or other connectors it cannot see. It never asks for a seed phrase or private key. After connect, click to switch/add Studio Next (chain `61997` / `0xf22d`, RPC `https://studio-next.genlayer.com/api`). The app will not auto-switch or auto-sign.
-3. **Test GEN.** Studio Next funds come from the built-in Studio faucet (💧 in the account selector at [studio-dev.genlayer.com](https://studio-dev.genlayer.com/)). Docs: [GenLayer networks](https://docs.genlayer.com/developers/networks). The public Asimov faucet (`testnet-faucet.genlayer.foundation`) funds chain `4221` and does **not** fund this app.
-4. **Roles.** Any funded 61997 wallet may create a round (1 GEN minimum). Only a listed committee member may nominate or vote. A recipient on the committee cannot vote on their own proposal. `evaluate_charter_fit` is permissionless but paid. Only the named recipient may withdraw. Only the round creator may close an expired round and claim the refund. Permissionless expired-proposal settlement is shown only when that deadline has actually passed. One connected wallet cannot vote or withdraw for someone else.
-5. **Verified deployment.** Contract `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`, chain `61997`, deploy tx `0xc5c220571c8d890c04715ce65cfd23ae92a0d49e696c596979591f771ab734e4`, create_round `0x1476320746c0efda5f97d2db6256c571c6da7adff7c494af33031bf9adfb0bdc`. Round `rnd-pilot-354517` is a locked recovery case; Stage 2 is **INCONCLUSIVE**. Evidence: `docs/PUBLIC_EVIDENCE.md`.
-6. **Limitations.** Studio Next `gen_call` currently returns JSON-RPC `-32603` rollback. Live ledgers cannot be proven from that path. Do not spend GEN just to look around. Builder Portal is not submitted from this work.
+Leave **PREVIEW DATA** off when you are checking live state.
 
-Static-host plan (not deployed): `docs/FRONTEND_STATIC_HOSTING.md`. Live mode must show RPC errors honestly; design preview stays explicitly labeled.
+## Tests and build
 
-### Read-only chain commands
+From the repository root:
 
 ```bash
-node scripts/run_charterflow_pilot.js --probe
-node scripts/run_charterflow_pilot.js --reconcile-deployment
-node scripts/run_charterflow_pilot.js --reconcile-stage2 --count=1 --interval=0
+npm test
+npm run test:frontend-reads
+npm run test:frontend-writes
+npm run test:wallet-steward
+npm run test:create-round-flow
+npm run test:contracts
+npm run build:frontend
+npm run lint:frontend
 ```
 
-These make no writes. Without `scripts/pilot_evidence.json` they use the public recorded hashes and will not create a new checkpoint. `--deploy-only`, `--lifecycle-only`, and `--resume` halt unless that local file (or `CHARTERFLOW_EVIDENCE_FILE`) already exists.
+`npm test` is the runner safety suite. Contract tests write only under `.pytest-artifacts/`, which is gitignored. `node scripts/verify_corrected_deploy.js` re-reads the deploy transaction and the deployed schema. It no longer requires the round registry to be empty.
 
-## Local tests vs chain proof
+## Vercel
 
-| Class | Status |
+Do not treat this repository as already deployed.
+
+| Setting | Value |
 |---|---|
-| Pytest contract tests | 18 tests in `tests/test_charterflow_core.py` |
-| Runner safety suite | `npm run test:safety` |
-| Frontend unit tests | `npm run test:frontend-reads` / `test:frontend-writes` |
-| Deployed source | Verified at the address and hash above |
-| Live round lifecycle | Blocked; Stage 2 INCONCLUSIVE |
+| Root Directory | `frontend` |
+| Framework | Vite |
+| Install command | `npm ci` |
+| Build command | `npm run build` |
+| Output directory | `dist` |
+| Node.js | 22 |
 
-PaymentSpike (`spike/PaymentSpike.py`) is a retired control contract. It does not validate CharterFlowCore. Operator-only helpers `scripts/fund_pilot_accounts.js` and `spike/run_payment_test.js` load keys from the OS credential manager via `keytar`. Do not run them from a public checkout.
+`frontend/vercel.json` rewrites `/(.*)` to `/index.html` so routes such as `/rounds/:id` and `/proposals/:id` load the SPA. Vite copies `frontend/public` into `dist`, including the contract source and `frontend/public/_redirects`.
+
+Environment variables are optional. The source defaults are already the public network. Set them only to override:
+
+| Variable | Value |
+|---|---|
+| `VITE_RPC_URL` | `https://studio-next.genlayer.com/api` |
+| `VITE_EXPLORER_URL` | `https://explorer-studio-dev.genlayer.com` |
+| `VITE_CONTRACT_ADDRESS` | `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8` |
+
+Never put a private key in a `VITE_` variable. Those values are compiled into the browser bundle.
+
+## Older contracts
+
+These addresses are not the verified flow above.
+
+- Legacy `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48` still runs source `4ec11b1bee98122d3dad5ab86f5823d676797c1c0873133d386adeeba12b9b72`. AI review and voting are closed. Its funded rounds stay visible for recovery.
+- Recovery `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21` still holds `rnd-pilot-354517` and `round-studio-next-rpc--mv9pwatt`. Do not nominate into them.
+
+History and diagnostics: [`docs/PUBLIC_EVIDENCE.md`](docs/PUBLIC_EVIDENCE.md), [`docs/CONTRACT_SPEC.md`](docs/CONTRACT_SPEC.md), [`docs/FRONTEND_STATIC_HOSTING.md`](docs/FRONTEND_STATIC_HOSTING.md), [`docs/LOCAL_WALKTHROUGH.md`](docs/LOCAL_WALKTHROUGH.md).

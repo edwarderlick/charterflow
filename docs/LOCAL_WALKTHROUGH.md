@@ -1,16 +1,16 @@
 # Local Vite walkthrough (before publish)
 
-Dev server: **http://localhost:5173/** (also bound as `http://127.0.0.1:5173/`)
+Dev server: **http://127.0.0.1:5174/**
 
 Keep **DESIGN PREVIEW** off unless you are checking fixture labels. Live mode must show Studio Next RPC errors honestly. Do not treat preview records as chain evidence. Do not connect a wallet or sign if you only want to inspect reads.
 
-Pinned live target: chain `61997`, contract `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`, Transaction Kit `0.1.0-rc.2`, genlayer-js `2.0.0-rc.1`.
+Pinned live target: chain `61997`, contract `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48`, live source SHA-256 `4ec11b1bee98122d3dad5ab86f5823d676797c1c0873133d386adeeba12b9b72`, Transaction Kit `0.1.0-rc.2`, genlayer-js `2.0.0-rc.1`. That deployment cannot be patched. Working-tree candidate SHA-256 `4b146292c840cf16e0dcfd7b8d488492092d73c2c3160dda366f922642eaee78` is not the live bytecode. Recovery contract `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21` keeps its two funded rounds. The two 1 GEN rounds on `0x9579` also stay there.
 
 ## Checklist
 
-1. `/` Landing — deployed contract `0x408D…ba21`, chain 61997. After the live query, expect `[READ ERROR]` / `-32603` rollback, not “0 rounds” and not sample grants.
-2. `/rounds` Explore — same read error; aggregate metrics `—`, tab counts `--`, not fabricated zeroes.
-3. `/rounds/rnd-pilot-354517` — `[READ ERROR] FAILED TO QUERY ROUND` with rollback diagnostic. Not a 404, not a verified round. This ID is a locked recovery case; do not nominate into it.
+1. `/` Landing — live contract `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48`, chain 61997. It already holds two funded rounds. Do not create another round on it.
+2. `/rounds` Explore — those two live rounds are `round-studio-next-rpc--mvarlewq` and `round-studio-next-rpc--mvas9jju`. Recovery IDs stay on `0x408D…`.
+3. `/rounds/rnd-pilot-354517` — locked recovery case on `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`. Do not nominate into it.
 4. `/rounds/new` Create round — form renders. Submitting would need a wallet on 61997. Do not submit until `gen_call` reads work. Nomination window is at least 24 hours.
 5. `/rounds/round-094-sdk/nominate` in live mode — `[READ ERROR]`, not a preview proposal and not an infinite spinner. Toggle preview only to confirm `DESIGN PREVIEW` / `PREVIEW RECORD` labels, then turn it off.
 6. `/proposals/does-not-exist` — live query error or 404, not a preview record.

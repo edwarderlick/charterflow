@@ -3,7 +3,11 @@
 **Audit date:** 2026-10-13  
 **Network target:** Studio Next, chain ID `61997`  
 **Current candidate source:** `contracts/CharterFlowCore.py`  
-**Current candidate SHA-256:** `34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee`
+**Current candidate SHA-256:** `4b146292c840cf16e0dcfd7b8d488492092d73c2c3160dda366f922642eaee78`  
+**Verified deployment:** `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8` runs `4b146292c840cf16e0dcfd7b8d488492092d73c2c3160dda366f922642eaee78` (tx `0x700b462e4620bf849b873af0e515357d08e905aa03a3682d5abb06d58f80da6c`). Do not deploy it again.
+
+**Unpatchable previous deployment:** `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48` still runs `4ec11b1bee98122d3dad5ab86f5823d676797c1c0873133d386adeeba12b9b72`. AI review and voting are closed. Funds are not recovered.  
+**Earlier recovery source:** `34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee` at `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`.
 
 This matrix is based on the current contract, tests, frontend transaction service, runner gates, and preserved historical evidence. It does not treat the earlier audit or the historical PaymentSpike as proof about the current CharterFlowCore candidate.
 
@@ -19,6 +23,7 @@ This matrix is based on the current contract, tests, frontend transaction servic
 | CF-06 | Transfer semantics | Grant payouts and creator refunds use native chain-token `emit_transfer(value=...)` messages, not ERC-20 transfers. | `_Recipient(address).emit_transfer(value=amount)` in both claim methods. States remain truthfully named `PAYOUT_EMITTED` / `REFUND_EMITTED`. | Documentation corrected. |
 | CF-07 | Network receipt limitation | Parent finality plus an emitted transfer message does not independently prove recipient delivery when Studio Next exposes no child receipt. | Preserved PaymentSpike evidence observed `getTriggeredTransactionIds(...) == []` for that historical transfer only. | Keep emitted-state language; never infer `PAID` or fabricate a child transaction ID. |
 | CF-08 | Frontend defect | Same-target calls could both pass the duplicate check while awaiting provider chain/account reads. | A synchronous in-memory reservation and durable `intent-prepared` record now exist before the first await. A delayed-provider concurrency test asserts `kit.submit` is called at most once. | Fixed locally; post-submit uncertainty still blocks for manual reconciliation. |
+| CF-09 | Runner compatibility | `gl.vm.run_nondet_unsafe` is absent from pinned std `kzr02ndm…`. `evaluate_charter_fit` on `0x9579` finalizes `FINISHED_WITH_ERROR` and does not commit. | Live txs `0x3e654164…` and `0xe6a80afe…`. Proposal `prp-round-studio-next-rpc--mvas9jju-1` stayed `SUBMITTED` / `PENDING` with reserved `50000000000000000` wei. | Repaired source is deployed at `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`. `0x9579` cannot be patched. Funds are not recovered. AI review and voting stay closed there. |
 
 ## Rationale-verification limitation
 

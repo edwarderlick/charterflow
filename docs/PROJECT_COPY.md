@@ -8,7 +8,7 @@ CharterFlow is a GenLayer intelligent contract for charter-bound grant rounds. A
 
 ## What the protocol does
 
-1. **Charter review.** Each round stores a frozen charter. `evaluate_charter_fit` asks validators for a categorical verdict through `gl.vm.run_nondet_unsafe`. Invalid JSON or schema fails closed to `NEEDS_CLARITY` and releases reserved funds. The contract does not claim consensus on free-text rationale.
+1. **Charter review.** Each round stores a frozen charter. `evaluate_charter_fit` asks validators for a categorical verdict through `gl.vm.run_nondet`. Invalid JSON or schema fails closed to `NEEDS_CLARITY` only when the validators agree on that verdict, and then releases reserved funds. A disagreement does not release funds. The contract does not claim consensus on free-text rationale.
 2. **Committee governance.** Voting uses integer 2/3 supermajority: `(N * 2 + 2) // 3`. If the proposal recipient sits on the committee, that member is recused and quorum is computed over `N-1` eligible voters.
 3. **Payout flow.** Approval creates a permanent recipient credit. The recipient pulls via `withdraw_credit()`, which emits `_Recipient(address).emit_transfer(value=...)`. The truthful on-chain state is `PAYOUT_EMITTED`. Parent finality plus an emitted message is not treated as independently proven recipient delivery on Studio Next. Creator leftovers use `close_round_and_refund` then `claim_creator_refund()`.
 

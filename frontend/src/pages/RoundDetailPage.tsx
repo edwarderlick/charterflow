@@ -2,11 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useData } from '../services/dataAccess';
 import { useWallet } from '../context/WalletContext';
-import {
-  prepareActionTransaction,
-  type PreparedTransaction,
-} from '../services/transactionService';
+import { prepareActionTransaction } from '../services/transactionService';
 import { TransactionModal } from '../components/TransactionModal';
+import { useTxModalResume } from '../services/txModalSnapshot';
+import { createRoundTxHash } from '../services/reconciledCreateRounds';
 import type { Round, Proposal } from '../types';
 import { CopyButton } from '../components/CopyButton';
 import { canNominate, canCloseExpiredRound, canClaimCreatorRefund } from '../services/permissions';
@@ -24,8 +23,8 @@ export const RoundDetailPage: React.FC = () => {
   const [proposalTab, setProposalTab] = useState<'ACTIVE' | 'DECIDED' | 'ALL'>('ACTIVE');
   const [memberSearch, setMemberSearch] = useState('');
   const [modalNotice, setModalNotice] = useState<string | null>(null);
-  const [preparedTx, setPreparedTx] = useState<PreparedTransaction | null>(null);
-  const [showTxModal, setShowTxModal] = useState<boolean>(false);
+  const { preparedTx, setPreparedTx, showTxModal, setShowTxModal, closeTxModal, initialSnapshot } = useTxModalResume();
+  const createTx = id ? createRoundTxHash(id) : null;
   const [isPreparingTx, setIsPreparingTx] = useState<boolean>(false);
   const [txError, setTxError] = useState<string | null>(null);
 
@@ -110,6 +109,7 @@ export const RoundDetailPage: React.FC = () => {
         account,
         chainId,
         adapter,
+        contractAddress: round.contractAddress,
         roundId: round.id,
       });
       setPreparedTx(prepared);
@@ -143,6 +143,7 @@ export const RoundDetailPage: React.FC = () => {
         account,
         chainId,
         adapter,
+        contractAddress: round.contractAddress,
         roundId: round.id,
       });
       setPreparedTx(prepared);
@@ -156,8 +157,13 @@ export const RoundDetailPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center p-20 font-mono text-xs text-[#888884] bg-[#131313]">
-        READING IMMUTABLE ROUND REGISTRY ON CHAIN 61997...
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 p-20 font-mono text-xs text-[#888884] bg-[#131313]">
+        <span>READING IMMUTABLE ROUND REGISTRY ON CHAIN 61997...</span>
+        {createTx && (
+          <p className="max-w-xl break-all text-[#e5e2e1]" data-testid="round-tx-hash">
+            CREATE TX {createTx.hash}
+          </p>
+        )}
       </div>
     );
   }
@@ -174,6 +180,11 @@ export const RoundDetailPage: React.FC = () => {
         <p className="font-['Hanken_Grotesk'] text-sm text-[#c8c6c2] max-w-md">
           An RPC timeout, network failure, or schema validation error occurred while querying GenLayer Studio Next. The failure was not masked as a 404.
         </p>
+        {createTx && (
+          <p className="max-w-xl break-all font-mono text-[11px] text-[#e5e2e1]" data-testid="round-tx-hash">
+            CREATE TX {createTx.hash}
+          </p>
+        )}
         <div className="p-3 bg-[#0e0e0e] border border-[#2a2a2a] text-xs text-[#ffb596] max-w-lg break-all font-mono text-left">
           DIAGNOSTIC: {error}
         </div>
@@ -203,6 +214,11 @@ export const RoundDetailPage: React.FC = () => {
         <div className="font-mono text-sm text-[#ff3344] uppercase font-bold">
           [ERROR 404] ROUND ID NOT FOUND ON RUNTIME
         </div>
+        {createTx && (
+          <p className="max-w-xl break-all font-mono text-[11px] text-[#e5e2e1]" data-testid="round-tx-hash">
+            CREATE TX {createTx.hash}
+          </p>
+        )}
         <p className="font-['Hanken_Grotesk'] text-sm text-[#c8c6c2] max-w-md">
           The requested round ID does not exist on the current data adapter.
         </p>
@@ -263,7 +279,14 @@ export const RoundDetailPage: React.FC = () => {
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 font-mono text-[11px] text-[#888884]">
           <div className="flex items-center gap-3">
             <span className="text-[#ff5719] font-bold">ROUND_REGISTRY:</span>
-            <span>{round.contractAddress ? (isDesignPreview ? `[DESIGN PREVIEW] ${round.contractAddress.slice(0, 10)}...` : round.contractAddress.slice(0, 10) + '...') : 'CONTRACT NOT CONNECTED'}</span>
+            <span className="break-all">
+              {round.legacyRecovery ? 'LEGACY RECOVERY ' : ''}
+              {round.contractAddress
+                ? isDesignPreview
+                  ? `[DESIGN PREVIEW] ${round.contractAddress}`
+                  : round.contractAddress
+                : 'CONTRACT NOT CONNECTED'}
+            </span>
             <span>|</span>
             <span>SESSION: {round.id.toUpperCase()}</span>
           </div>
@@ -292,6 +315,11 @@ export const RoundDetailPage: React.FC = () => {
               <h1 className="font-['Space_Grotesk'] text-2xl sm:text-4xl uppercase font-bold text-[#e5e2e1] leading-tight">
                 {round.title}
               </h1>
+              {createTx && (
+                <p className="font-mono text-[11px] break-all text-[#e5e2e1]" data-testid="round-tx-hash">
+                  CREATE TX {createTx.hash}
+                </p>
+              )}
               <p className="font-['Hanken_Grotesk'] text-sm sm:text-base text-[#c8c6c2]">
                 {round.summary}
               </p>
@@ -368,7 +396,7 @@ export const RoundDetailPage: React.FC = () => {
               </div>
               <div className="flex items-center gap-1.5 text-sm text-[#e5e2e1]">
                 <span className="w-2 h-2 rounded-full bg-[#ffb800]"></span>
-                <span>{round.contractAddress ? (isDesignPreview ? `[DESIGN PREVIEW] ${round.contractAddress.slice(0, 10)}...` : `${round.contractAddress.slice(0, 10)}...`) : 'CONTRACT NOT CONNECTED'}</span>
+                <span className="break-all">{round.contractAddress ? (isDesignPreview ? `[DESIGN PREVIEW] ${round.contractAddress}` : round.contractAddress) : 'CONTRACT NOT CONNECTED'}</span>
               </div>
               <span className="text-[10px] text-[#888884]">
                 {round.contractAddress ? (isDesignPreview ? 'Sample preview address — not live state' : 'Configured deployed contract address') : 'Contract address unavailable'}
@@ -928,9 +956,10 @@ export const RoundDetailPage: React.FC = () => {
       <TransactionModal
         isOpen={showTxModal}
         onClose={() => {
-          setShowTxModal(false);
+          closeTxModal();
           setPreparedTx(null);
         }}
+        initialSnapshot={initialSnapshot}
         prepared={preparedTx}
         provider={provider}
         account={account || ''}

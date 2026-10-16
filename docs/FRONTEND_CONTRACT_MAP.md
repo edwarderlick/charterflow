@@ -2,7 +2,7 @@
 
 **Document Version:** 1.3.0-LIVE-READS-ALIGNED  
 **Purpose:** Precise mapping between frontend UI components, the implemented GenLayer Python Intelligent Contract (`contracts/CharterFlowCore.py`), and the frontend live reads adapter (`TruthfulLiveDataAccessAdapter`).  
-**Status:** Live read adapter configured for verified deployment `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`; Stage 2 round readback is unresolved and later writes remain blocked
+**Status:** Live read adapter configured for corrected deployment `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48`; recovery rounds remain on `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`
 
 ---
 
@@ -16,13 +16,13 @@ To guarantee strict truthfulness in the user interface, all application state is
    - Mock simulated event stream and telemetry logs.
    - Client-side filtering and sorting.
 2. **Tier 2: Implemented Contract API (`contracts/CharterFlowCore.py`)**
-   - The concrete Python Intelligent Contract interface implemented in `contracts/CharterFlowCore.py` and validated by 18 unit tests in `tests/test_charterflow_core.py`.
+   - The concrete Python Intelligent Contract interface implemented in `contracts/CharterFlowCore.py`, covered by `tests/test_charterflow_core.py` and `tests/test_runner_compat.py`.
    - Native value transfers via `_Recipient(Address(...)).emit_transfer(...)`.
-   - AI review equivalence executed via `gl.vm.run_nondet_unsafe(...)` with categorical verdict agreement.
+   - AI review equivalence executed via `gl.vm.run_nondet(...)` with categorical verdict agreement. `run_nondet_unsafe` is not part of the pinned runner.
    - Deterministic UTC timestamps via `datetime.datetime.now(datetime.timezone.utc).timestamp()`.
    - Paginated views with bounded limits (max 50 for IDs/summaries, max 20 for full proposals).
 3. **Tier 3: Verified Deployed Behavior on GenLayer Studio Next (Chain ID 61997)**
-   - Exact contract source SHA-256 `34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee` is deployed on GenLayer Studio Next (Chain ID 61997).
+   - Verified contract `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8` runs source SHA-256 `4b146292c840cf16e0dcfd7b8d488492092d73c2c3160dda366f922642eaee78`. Legacy `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48` still runs `4ec11b1bee98122d3dad5ab86f5823d676797c1c0873133d386adeeba12b9b72`. Recovery source `34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee` remains on `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`.
    - Requires status `ACCEPTED` or `FINALIZED` **AND** execution result `FINISHED_WITH_RETURN`.
    - The intended Stage 2 round is not treated as verified until full round, registry, genesis-ledger, and balance readback agree. RPC/database errors are shown as errors, never as an empty chain.
    - External child message finalization must be confirmed before claiming delivery; the contract state remains truthfully named `PAYOUT_EMITTED` or `REFUND_EMITTED` when only message emission is proven.

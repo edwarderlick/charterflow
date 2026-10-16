@@ -1,0 +1,117 @@
+{
+  "readAt": "2026-10-16T21:58:07.162Z",
+  "network": "GenLayer Studio development preview",
+  "chainId": 61997,
+  "rpcUrl": "https://studio-next.genlayer.com/api",
+  "contract": "0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8",
+  "localSourceSha256": "4b146292c840cf16e0dcfd7b8d488492092d73c2c3160dda366f922642eaee78",
+  "contractBalanceWei": "950000000000000000",
+  "roundId": "round-open-source-rpc--mvb7nltc",
+  "proposalId": "prp-round-open-source-rpc--mvb7nltc-1",
+  "round": {
+    "state": "ACTIVE",
+    "creator": "0xb3F7518df619ef485f7a1568ED3705bB6f5B0407",
+    "committee": [
+      "0xb3F7518df619ef485f7a1568ED3705bB6f5B0407",
+      "0x31e14df3b4f47F2428F3B78E7279691A78f70a05"
+    ],
+    "initialDepositWei": "1000000000000000000",
+    "grantCapWei": "100000000000000000",
+    "availableWei": "950000000000000000",
+    "reservedWei": "0",
+    "approvedCreditsWei": "0",
+    "payoutsEmittedWei": "50000000000000000",
+    "refundsEmittedWei": "0",
+    "creatorClaimableWei": "0",
+    "nominationCutoff": "2026-10-23T16:53:52.000Z",
+    "votingDurationSeconds": 259200,
+    "roundEnd": "2026-10-27T16:53:52.000Z"
+  },
+  "proposal": {
+    "state": "PAYOUT_EMITTED",
+    "title": "Build and publish an open-source TypeScript dashboard that c",
+    "proposer": "0xb3F7518df619ef485f7a1568ED3705bB6f5B0407",
+    "recipient": "0x31e14df3b4f47F2428F3B78E7279691A78f70a05",
+    "requestedAmountWei": "50000000000000000",
+    "reviewVerdict": "ELIGIBLE",
+    "reviewReason": "VALIDATOR_AGREED_VERDICT_ELIGIBLE; SEMANTIC_RATIONALE_NOT_VERIFIED",
+    "votesYes": 1,
+    "votesNo": 0,
+    "votedAddresses": ["0xb3F7518df619ef485f7a1568ED3705bB6f5B0407"],
+    "creditWithdrawn": true
+  },
+  "transactions": [
+    {
+      "step": "deploy",
+      "hash": "0x700b462e4620bf849b873af0e515357d08e905aa03a3682d5abb06d58f80da6c",
+      "status": "FINALIZED",
+      "execution": "FINISHED_WITH_RETURN",
+      "from": "0x7E4E1f7DcC3DA063F9110477Ad348C90E8599253",
+      "contract": "0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8"
+    },
+    {
+      "step": "create_round",
+      "hash": "0x753a915e0a882d403d0338a04ae4c9569e34eeb04afbd7b275b09c28128dd8d0",
+      "status": "FINALIZED",
+      "execution": "FINISHED_WITH_RETURN",
+      "from": "0xb3F7518df619ef485f7a1568ED3705bB6f5B0407",
+      "valueWei": "1000000000000000000"
+    },
+    {
+      "step": "nominate_proposal",
+      "hash": "0x220c4ef78af5f055e11bf1d00cdafbc1bd17dd16943c214713a6643d53c4e482",
+      "status": "FINALIZED",
+      "execution": "FINISHED_WITH_RETURN",
+      "from": "0xb3F7518df619ef485f7a1568ED3705bB6f5B0407"
+    },
+    {
+      "step": "evaluate_charter_fit",
+      "hash": "0x121377a431bc73fde4595abbe22108fe07070ebcffe48ab5fb899cf6dde362c3",
+      "status": "FINALIZED",
+      "execution": "FINISHED_WITH_RETURN",
+      "from": "0xb3F7518df619ef485f7a1568ED3705bB6f5B0407",
+      "nonce": 13,
+      "note": "First of two finalized calls of the same method. Not a separate required stage."
+    },
+    {
+      "step": "evaluate_charter_fit",
+      "hash": "0x06e6aad2a144b0dc139817cf9aecfd184ceb3d05c75c67a098d7cf2c56b811bc",
+      "status": "FINALIZED",
+      "execution": "FINISHED_WITH_RETURN",
+      "from": "0xb3F7518df619ef485f7a1568ED3705bB6f5B0407",
+      "nonce": 14,
+      "note": "Second finalized call of the same method by the same account. The contract stores one ELIGIBLE verdict."
+    },
+    {
+      "step": "cast_vote",
+      "hash": "0x899a922020fde7f680e39812df9d344d04f1c5702f71099e9648d528f3684526",
+      "status": "FINALIZED",
+      "execution": "FINISHED_WITH_RETURN",
+      "from": "0xb3F7518df619ef485f7a1568ED3705bB6f5B0407",
+      "args": ["prp-round-open-source-rpc--mvb7nltc-1", "YES"]
+    },
+    {
+      "step": "withdraw_credit",
+      "hash": "0x0f29c0f7523d74aa89d8e93cbb995c19d69191052ea8e1893de3656fec032c6a",
+      "status": "FINALIZED",
+      "execution": "FINISHED_WITH_RETURN",
+      "from": "0x31e14df3b4f47F2428F3B78E7279691A78f70a05"
+    },
+    {
+      "step": "child_transfer",
+      "hash": "0x6e012d41c822b321271b194318121a240681d4568087d06a63ffb4e882b6d6f0",
+      "status": "FINALIZED",
+      "execution": "NOT_VOTED",
+      "from": "0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8",
+      "to": "0x31e14df3b4f47F2428F3B78E7279691A78f70a05",
+      "valueWei": "50000000000000000",
+      "triggeredBy": "0x0f29c0f7523d74aa89d8e93cbb995c19d69191052ea8e1893de3656fec032c6a",
+      "triggeredOn": "finalized",
+      "valueCredited": true
+    }
+  ],
+  "notDone": [
+    "close_round_and_refund",
+    "claim_creator_refund"
+  ]
+}

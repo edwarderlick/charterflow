@@ -814,6 +814,7 @@ async function verifyAndRecordDeploymentReadback({
   txHash,
   contractAddress,
   sourceCode,
+  expectedSourceHash = EXPECTED_SOURCE_HASH,
   saveEvidenceOption = true,
 }) {
   const verifiedAt = new Date().toISOString();
@@ -834,9 +835,9 @@ async function verifyAndRecordDeploymentReadback({
   }
   const transactionSourceSha256 = hashDeploymentSourceFromTransaction(transactionResponse);
   const suppliedSourceSha256 = crypto.createHash('sha256').update(sourceCode).digest('hex');
-  if (transactionSourceSha256 !== EXPECTED_SOURCE_HASH || suppliedSourceSha256 !== EXPECTED_SOURCE_HASH) {
+  if (transactionSourceSha256 !== expectedSourceHash || suppliedSourceSha256 !== expectedSourceHash) {
     throw new Error(
-      `Deployment source mismatch: transaction=${transactionSourceSha256}, local=${suppliedSourceSha256}, expected=${EXPECTED_SOURCE_HASH}`
+      `Deployment source mismatch: transaction=${transactionSourceSha256}, local=${suppliedSourceSha256}, expected=${expectedSourceHash}`
     );
   }
 
@@ -857,7 +858,7 @@ async function verifyAndRecordDeploymentReadback({
     verifiedAt,
     chainId: EXPECTED_CHAIN_ID,
     rpcUrl: EXPECTED_RPC_URL,
-    sourceHash: EXPECTED_SOURCE_HASH,
+    sourceHash: expectedSourceHash,
     transactionSourceSha256,
     txHash,
     contractAddress,

@@ -4,11 +4,14 @@
   "private": true,
   "description": "CharterFlow: Multi-Round Grant Coordination Protocol on GenLayer",
   "scripts": {
-    "test:contracts": "pytest tests/test_charterflow_core.py",
+    "test:contracts": "pytest tests/test_runner_compat.py tests/test_charterflow_core.py --artifacts-dir .pytest-artifacts",
     "test:safety": "node scripts/test_runner_safety.js",
     "test:frontend-reads": "npx tsx scripts/test_frontend_reads.ts",
     "test:frontend-writes": "npx tsx scripts/test_frontend_writes.ts",
     "test:wallet-steward": "npx tsx scripts/test_wallet_steward.ts",
+    "test:create-round-flow": "npx tsx scripts/test_create_round_flow.ts",
+    "test:create-round-browser": "npx tsx scripts/test_create_round_browser.ts",
+    "test:deploy-intent": "npx tsx scripts/test_deploy_intent.ts",
     "test": "node scripts/test_runner_safety.js",
     "build:frontend": "npm --prefix frontend run build",
     "lint:frontend": "npm --prefix frontend run lint"

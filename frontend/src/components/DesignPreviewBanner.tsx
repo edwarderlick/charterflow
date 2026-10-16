@@ -54,7 +54,7 @@ export const DesignPreviewBanner: React.FC = () => {
           <span className={`w-2 h-2 rounded-full ${configured ? 'bg-[#00e599]' : 'bg-[#ffb800]'}`}></span>
           <span className="text-[#c8c6c2]">
             {configured
-              ? `DEPLOYED CONTRACT CONFIGURED // ${NETWORK_CONFIG.contractAddress.slice(0, 8)}...${NETWORK_CONFIG.contractAddress.slice(-6)} · Chain 61997 · Live reads may fail; round ${VERIFIED_DEPLOYMENT.intendedRoundId} remains unverified.`
+              ? `DEPLOYED CONTRACT CONFIGURED // ${NETWORK_CONFIG.contractAddress.slice(0, 8)}...${NETWORK_CONFIG.contractAddress.slice(-6)} · Chain 61997 · Live source ${VERIFIED_DEPLOYMENT.sourceSha256.slice(0, 8)}…`
               : `Contract address not configured // GenLayer Studio Next (Chain 61997 · RPC: ${NETWORK_CONFIG.rpcUrl}). Live reads are unavailable.`}
           </span>
         </div>

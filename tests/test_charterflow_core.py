@@ -34,7 +34,12 @@ gc.wasi = wasi_mock
 import genlayer._internal.on_chain.gl_call as gcall
 gcall._imp_raw = wasi_mock.gl_call
 
-from contracts.CharterFlowCore import CharterFlowCore, _parse_strict_ai_verdict
+from contracts.CharterFlowCore import CharterFlowCore, Proposal, _parse_strict_ai_verdict
+
+try:
+    from contracts.CharterFlowCore import _as_address
+except ImportError:
+    _as_address = None  # deployed 34ea0e37 source has no normalizer
 
 
 # ==============================================================================
@@ -57,9 +62,9 @@ def _direct_run_nondet_hook(leader_fn, validator_fn, /, **kwargs):
     return result
 
 
+# Direct mode only. This does not add APIs to the pinned runner.
 gl.vm.run_nondet = _direct_run_nondet_hook
 gl.vm.run_nondet_default = _direct_run_nondet_hook
-gl.vm.run_nondet_unsafe = _direct_run_nondet_hook
 
 
 @pytest.fixture(autouse=True)
@@ -73,12 +78,11 @@ def restore_sdk_environment():
     gcall._imp_raw = wasi_mock.gl_call
     gl.vm.run_nondet = _direct_run_nondet_hook
     gl.vm.run_nondet_default = _direct_run_nondet_hook
-    gl.vm.run_nondet_unsafe = _direct_run_nondet_hook
     yield
     setup_sdk_paths(version="v0.6.0-rc8")
 
 
-def deploy_core(vm: VMContext) -> CharterFlowCore:
+def deploy_core(vm: VMContext, cls=CharterFlowCore, *, install_nondet_hook: bool = True):
     """Deploy CharterFlowCore in direct mode with balance and message tracking."""
     setup_sdk_paths(version="v0.6.0-rc8")
     sys.modules["genlayer.py"] = types.SimpleNamespace(calldata=gl.calldata)
@@ -86,17 +90,22 @@ def deploy_core(vm: VMContext) -> CharterFlowCore:
     gc.wasi = wasi_mock
     import genlayer._internal.on_chain.gl_call as gcall
     gcall._imp_raw = wasi_mock.gl_call
-    gl.vm.run_nondet = _direct_run_nondet_hook
-    gl.vm.run_nondet_default = _direct_run_nondet_hook
-    gl.vm.run_nondet_unsafe = _direct_run_nondet_hook
+    if install_nondet_hook:
+        gl.vm.run_nondet = _direct_run_nondet_hook
+        gl.vm.run_nondet_default = _direct_run_nondet_hook
+    else:
+        import importlib
+        import genlayer.vm as vm_mod
+        importlib.reload(vm_mod)
+        gl.vm = vm_mod
 
     _captured_nondet_calls.clear()
     captured_emitted_messages.clear()
     ctx = _BuilderCtx.empty()
-    td = _storage_build(ctx, CharterFlowCore)
+    td = _storage_build(ctx, cls)
     slot = vm._storage.get_store_slot(ROOT_SLOT_ID)
     instance = td.get(slot, 0)
-    init = getattr(CharterFlowCore, "__init__", None)
+    init = getattr(cls, "__init__", None)
     if hasattr(init, ORIGINAL_INIT_ATTR):
         init = getattr(init, ORIGINAL_INIT_ATTR)
     if init is not None:
@@ -1505,3 +1514,196 @@ def test_guarded_time_arithmetic():
                     round_end=gl.u64(100),  # Much smaller than min_buffer!
                 )
             assert "ERR_INVALID_TIME_SEQUENCE" in str(exc.value)
+
+
+# ==============================================================================
+# 19. Browser calldata Address is a hex string (Studio Next nomination crash)
+# ==============================================================================
+
+BROWSER_RECIPIENT_HEX = "0x31e14df3b4f47F2428F3B78E7279691A78f70a05"
+BROWSER_NOMINATION_AMOUNT = 50_000_000_000_000_000  # 0.05 GEN, same as failed tx 0x56c7d6d5...
+BROWSER_NOMINATION_TITLE = "Build an open-source TypeScript dashboard that checks Studio"
+BROWSER_NOMINATION_DELIVERABLES = (
+    "Publish the source repository, a working public dashboard, reproducible read-only RPC checks, "
+    "and setup documentation. Do not collect wallet credentials."
+)
+DEPLOYED_SOURCE_SHA256 = "34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee"
+
+
+def test_as_address_normalizes_hex_string_and_rejects_invalid():
+    """Official GenLayer guidance: persist Address(hex), never a raw str."""
+    if _as_address is None:
+        pytest.skip("deployed source has no _as_address")
+    addr = _as_address(BROWSER_RECIPIENT_HEX)
+    assert isinstance(addr, gl.Address)
+    assert addr.as_bytes == gl.Address(BROWSER_RECIPIENT_HEX).as_bytes
+    assert _as_address(addr) is addr or _as_address(addr) == addr
+    with pytest.raises(Exception, match="ERR_INVALID_ADDRESS"):
+        _as_address("not-an-address")
+    with pytest.raises(Exception, match="ERR_INVALID_ADDRESS"):
+        _as_address("0x1234")
+
+
+def test_storage_address_setter_rejects_unnormalized_hex_string():
+    """Reproduce the deployed Studio crash: AddrDesc.set requires Address.as_bytes, not str."""
+    vm = VMContext()
+    with vm.activate():
+        deploy_core(vm)
+        with pytest.raises(AttributeError, match="as_bytes"):
+            Proposal(
+                proposal_id="prp-crash-1",
+                round_id="rnd-crash",
+                proposer=MEMBER_A,
+                recipient=BROWSER_RECIPIENT_HEX,
+                title=BROWSER_NOMINATION_TITLE,
+                requested_amount_wei=gl.u256(BROWSER_NOMINATION_AMOUNT),
+                deliverables_text=BROWSER_NOMINATION_DELIVERABLES,
+                submission_timestamp=gl.u64(get_current_time()),
+                state="SUBMITTED",
+                review_verdict="PENDING",
+                review_reason="",
+                voting_deadline=gl.u64(0),
+                votes_yes=gl.u32(0),
+                votes_no=gl.u32(0),
+                voted_addresses_json="[]",
+                credit_withdrawn=False,
+            )
+
+
+def test_nominate_proposal_hex_string_recipient_matches_browser_calldata():
+    """Public nominate_proposal must accept the same 0x hex string the browser/SDK encodes."""
+    vm = VMContext()
+    with vm.activate():
+        core = deploy_core(vm)
+        cutoff, duration, round_end = valid_round_times()
+        deposit = gl.u256(10**18)
+        with as_caller(CREATOR, value=deposit):
+            core.create_round(
+                round_id="round-studio-next-rpc--mv9pwatt",
+                title="Studio Next RPC Health Dashboard Pilot",
+                description="Fund an open-source dashboard that displays Studio Next RPC read health.",
+                charter_text=DEFAULT_CHARTER,
+                committee_roster=[
+                    "0x2222222222222222222222222222222222222222",
+                    "0x3333333333333333333333333333333333333333",
+                    "0x4444444444444444444444444444444444444444",
+                ],
+                grant_cap_wei=gl.u256(10**17),
+                nomination_cutoff=cutoff,
+                voting_duration=duration,
+                round_end=round_end,
+            )
+
+        encoded = gl.calldata.encode({
+            "": "nominate_proposal",
+            "args": [
+                "round-studio-next-rpc--mv9pwatt",
+                BROWSER_RECIPIENT_HEX,
+                BROWSER_NOMINATION_TITLE,
+                BROWSER_NOMINATION_AMOUNT,
+                BROWSER_NOMINATION_DELIVERABLES,
+            ],
+        })
+        decoded = gl.calldata.decode(encoded)
+        args = decoded["args"]
+        assert isinstance(args[1], str), "browser calldata recipient must remain a hex string after decode"
+        assert args[1] == BROWSER_RECIPIENT_HEX
+        assert not hasattr(args[1], "as_bytes")
+
+        with as_caller(MEMBER_A):
+            pid = core.nominate_proposal(*args)
+
+        p = core.get_proposal(pid)
+        r = core.get_round("round-studio-next-rpc--mv9pwatt")
+        assert str(p["recipient"]).lower() == BROWSER_RECIPIENT_HEX.lower()
+        assert str(p["proposer"]).lower() == str(MEMBER_A).lower()
+        assert int(p["requested_amount_wei"]) == BROWSER_NOMINATION_AMOUNT
+        assert int(r["reserved_wei"]) == BROWSER_NOMINATION_AMOUNT
+        assert int(r["available_wei"]) == 10**18 - BROWSER_NOMINATION_AMOUNT
+        assert int(r["proposal_nonce"]) == 1
+        assert str(p["recipient"]).lower() == gl.Address(BROWSER_RECIPIENT_HEX).as_hex.lower()
+        if _as_address is not None:
+            assert _as_address(p["recipient"]) == gl.Address(BROWSER_RECIPIENT_HEX)
+
+
+def test_hex_string_recipient_full_lifecycle_review_vote_withdraw():
+    """Complete local lifecycle using the browser hex-string recipient representation."""
+    vm = VMContext()
+    with vm.activate():
+        core = deploy_core(vm)
+        cutoff, duration, round_end = valid_round_times()
+        deposit = gl.u256(10**18)
+        grant = gl.u256(BROWSER_NOMINATION_AMOUNT)
+        with as_caller(CREATOR, value=deposit):
+            core.create_round(
+                round_id="rnd-hex-life",
+                title="Hex Recipient Lifecycle",
+                description="Lifecycle with ABI hex-string recipient",
+                charter_text=DEFAULT_CHARTER,
+                committee_roster=[MEMBER_A, MEMBER_B, MEMBER_C],
+                grant_cap_wei=gl.u256(10**17),
+                nomination_cutoff=cutoff,
+                voting_duration=duration,
+                round_end=round_end,
+            )
+
+        with as_caller(MEMBER_A):
+            pid = core.nominate_proposal(
+                round_id="rnd-hex-life",
+                recipient=BROWSER_RECIPIENT_HEX,
+                title=BROWSER_NOMINATION_TITLE,
+                requested_amount_wei=grant,
+                deliverables_text=BROWSER_NOMINATION_DELIVERABLES,
+            )
+
+        gl.nondet.exec_prompt = lambda p: json.dumps({"verdict": "ELIGIBLE", "reason": "OSS dashboard"})
+        assert core.evaluate_charter_fit(pid) == "ELIGIBLE"
+
+        with as_caller(MEMBER_B):
+            core.cast_vote(pid, "YES")
+        with as_caller(MEMBER_C):
+            state = core.cast_vote(pid, "YES")
+        assert state == "APPROVED"
+
+        recipient_addr = gl.Address(BROWSER_RECIPIENT_HEX)
+        with as_caller(recipient_addr):
+            paid = core.withdraw_credit(pid)
+        assert int(paid) == BROWSER_NOMINATION_AMOUNT
+        p = core.get_proposal(pid)
+        assert p["state"] == "PAYOUT_EMITTED"
+        assert p["credit_withdrawn"] is True
+        assert captured_emitted_messages, "withdraw must emit a native transfer"
+        assert str(captured_emitted_messages[-1]["address"]).lower() == BROWSER_RECIPIENT_HEX.lower()
+
+
+def test_nominate_proposal_invalid_hex_raises_err_invalid_address():
+    if _as_address is None:
+        pytest.skip("deployed source has no _as_address")
+    vm = VMContext()
+    with vm.activate():
+        core = deploy_core(vm)
+        cutoff, duration, round_end = valid_round_times()
+        with as_caller(CREATOR, value=gl.u256(10**18)):
+            core.create_round(
+                round_id="rnd-bad-addr",
+                title="Invalid Address Gate",
+                description="Reject non-Address recipient input",
+                charter_text=DEFAULT_CHARTER,
+                committee_roster=[MEMBER_A, MEMBER_B],
+                grant_cap_wei=gl.u256(10**17),
+                nomination_cutoff=cutoff,
+                voting_duration=duration,
+                round_end=round_end,
+            )
+        with as_caller(MEMBER_A):
+            with pytest.raises(Exception, match="ERR_INVALID_ADDRESS"):
+                core.nominate_proposal(
+                    round_id="rnd-bad-addr",
+                    recipient="not-an-address",
+                    title=BROWSER_NOMINATION_TITLE,
+                    requested_amount_wei=gl.u256(BROWSER_NOMINATION_AMOUNT),
+                    deliverables_text=BROWSER_NOMINATION_DELIVERABLES,
+                )
+        r = core.get_round("rnd-bad-addr")
+        assert int(r["reserved_wei"]) == 0
+        assert int(r["proposal_nonce"]) == 0

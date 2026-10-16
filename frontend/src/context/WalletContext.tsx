@@ -1,14 +1,19 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  applyAccountsChanged,
   classifyWalletError,
   collectInjectedProviders,
+  firstAccountFromProviderAccounts,
   formatWalletBalanceLabel,
   readWalletSession,
   selectWalletByRdns,
+  shouldAdoptAsyncWalletResult,
   shouldAdoptAuthorizedAccounts,
   writeWalletSession,
+  type AsyncWalletGate,
   type DiscoveredWallet,
   type Eip1193Provider,
+  type WalletSession,
 } from '../services/eip1193';
 
 export const GENLAYER_STUDIO_NEXT = {
@@ -85,7 +90,33 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
   const eip6963 = useRef<DiscoveredWallet[]>([]);
   const accountRef = useRef<string | null>(null);
-  accountRef.current = account;
+  const sessionStatusRef = useRef<WalletSession['status'] | null>(
+    readWalletSession(getLocalStorage())?.status ?? null
+  );
+  const sessionEpochRef = useRef(0);
+  const selectedRdnsRef = useRef<string | undefined>(selectedRdns);
+  const selectedProviderRef = useRef<Eip1193Provider | null>(null);
+  useEffect(() => {
+    accountRef.current = account;
+  }, [account]);
+  useEffect(() => {
+    selectedRdnsRef.current = selectedRdns;
+  }, [selectedRdns]);
+
+  const currentWalletGate = useCallback(
+    (requireConnected = false): AsyncWalletGate => ({
+      epoch: sessionEpochRef.current,
+      status: sessionStatusRef.current,
+      rdns: selectedRdnsRef.current,
+      provider: selectedProviderRef.current,
+      requireConnected,
+    }),
+    []
+  );
+
+  const bumpWalletEpoch = useCallback(() => {
+    sessionEpochRef.current += 1;
+  }, []);
 
   const refreshDiscovery = useCallback(() => {
     const win = typeof window === 'undefined' ? null : (window as Window & { ethereum?: Eip1193Provider });
@@ -102,10 +133,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [wallets, selectedRdns]
   );
   const provider = selectedWallet?.provider || null;
+  useEffect(() => {
+    selectedProviderRef.current = provider;
+  }, [provider]);
 
   const updateBalance = useCallback(async (userAddress: string, activeProvider: Eip1193Provider) => {
+    const started = currentWalletGate(true);
+    const stillCurrent = () =>
+      shouldAdoptAsyncWalletResult(started, currentWalletGate(true)) &&
+      selectedProviderRef.current === activeProvider;
     try {
       const currentChainHex = await activeProvider.request({ method: 'eth_chainId' });
+      if (!stillCurrent()) return;
       const currentId = parseInt(String(currentChainHex), 16);
       if (currentId !== GENLAYER_STUDIO_NEXT.chainId) {
         setBalanceGen(null);
@@ -116,6 +155,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         method: 'eth_getBalance',
         params: [userAddress, 'latest'],
       });
+      if (!stillCurrent()) return;
       if (balanceHex === undefined || balanceHex === null || balanceHex === '') {
         setBalanceGen(null);
         setBalanceReadFailed(true);
@@ -136,10 +176,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setBalanceGen(`${whole}.${fourDec.toString().padStart(4, '0')}`);
       }
     } catch {
+      if (!stillCurrent()) return;
       setBalanceGen(null);
       setBalanceReadFailed(true);
     }
-  }, []);
+  }, [currentWalletGate]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -171,11 +212,21 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (!provider) return;
 
     const handleAccountsChanged = (accounts: unknown) => {
-      const list = Array.isArray(accounts) ? accounts.map(String) : [];
-      if (list.length > 0) {
-        setAccount(list[0]);
+      if (selectedProviderRef.current !== provider) {
+        return;
+      }
+      const session: WalletSession | null =
+        sessionStatusRef.current != null
+          ? { status: sessionStatusRef.current }
+          : readWalletSession(getLocalStorage());
+      const next = applyAccountsChanged(session, accounts);
+      if (!next.adopt) {
+        return;
+      }
+      if (next.account) {
+        setAccount(next.account);
         setError(null);
-        updateBalance(list[0], provider);
+        updateBalance(next.account, provider);
       } else {
         setAccount(null);
         setBalanceGen(null);
@@ -184,6 +235,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
 
     const handleChainChanged = (chainHex: unknown) => {
+      if (selectedProviderRef.current !== provider) {
+        return;
+      }
       const id = parseInt(String(chainHex), 16);
       setChainId(Number.isFinite(id) ? id : null);
       const current = accountRef.current;
@@ -197,21 +251,37 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     provider.on?.('accountsChanged', handleAccountsChanged);
     provider.on?.('chainChanged', handleChainChanged);
 
-    const session = readWalletSession(getLocalStorage());
+    const restoreStarted = currentWalletGate(true);
     provider
       .request({ method: 'eth_chainId' })
       .then((hex) => {
+        if (!shouldAdoptAsyncWalletResult(restoreStarted, currentWalletGate(true))) {
+          return;
+        }
+        if (selectedProviderRef.current !== provider) {
+          return;
+        }
         const id = parseInt(String(hex), 16);
         setChainId(Number.isFinite(id) ? id : null);
-        if (!shouldAdoptAuthorizedAccounts(session)) {
+        const liveSession =
+          sessionStatusRef.current != null
+            ? { status: sessionStatusRef.current }
+            : readWalletSession(getLocalStorage());
+        if (!shouldAdoptAuthorizedAccounts(liveSession)) {
           return;
         }
         return provider.request({ method: 'eth_accounts' }).then((accounts) => {
-          const list = Array.isArray(accounts) ? accounts.map(String) : [];
-          if (list.length > 0) {
-            setAccount(list[0]);
+          if (!shouldAdoptAsyncWalletResult(restoreStarted, currentWalletGate(true))) {
+            return;
+          }
+          if (selectedProviderRef.current !== provider) {
+            return;
+          }
+          const first = firstAccountFromProviderAccounts(accounts);
+          if (first) {
+            setAccount(first);
             if (id === GENLAYER_STUDIO_NEXT.chainId) {
-              updateBalance(list[0], provider);
+              updateBalance(first, provider);
             }
           }
         });
@@ -222,7 +292,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       provider.removeListener?.('accountsChanged', handleAccountsChanged);
       provider.removeListener?.('chainChanged', handleChainChanged);
     };
-  }, [provider, updateBalance]);
+  }, [provider, updateBalance, currentWalletGate]);
 
   const connectWallet = async (rdns?: string) => {
     const discovered = refreshDiscovery();
@@ -235,38 +305,60 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setError('Multiple injected wallets detected. Choose one wallet to connect. The app does not claim support for wallets it cannot see as EIP-1193 providers.');
       return;
     }
+    bumpWalletEpoch();
     setSelectedRdns(chosen.rdns);
+    selectedRdnsRef.current = chosen.rdns;
+    selectedProviderRef.current = chosen.provider;
+    const connectStarted = currentWalletGate(false);
     setIsConnecting(true);
     setError(null);
+    const connectStillCurrent = () =>
+      shouldAdoptAsyncWalletResult(connectStarted, currentWalletGate(false)) &&
+      selectedProviderRef.current === chosen.provider;
     try {
       const accounts = await chosen.provider.request({ method: 'eth_requestAccounts' });
+      if (!connectStillCurrent()) {
+        return;
+      }
       const hexChain = await chosen.provider.request({ method: 'eth_chainId' });
+      if (!connectStillCurrent()) {
+        return;
+      }
       const id = parseInt(String(hexChain), 16);
-      setChainId(Number.isFinite(id) ? id : null);
-      const list = Array.isArray(accounts) ? accounts.map(String) : [];
-      if (list.length > 0) {
-        setAccount(list[0]);
+      const first = firstAccountFromProviderAccounts(accounts);
+      if (first) {
+        setAccount(first);
+        sessionStatusRef.current = 'connected';
         writeWalletSession(getLocalStorage(), { status: 'connected', rdns: chosen.rdns });
+        setChainId(Number.isFinite(id) ? id : null);
         if (id === GENLAYER_STUDIO_NEXT.chainId) {
-          await updateBalance(list[0], chosen.provider);
+          await updateBalance(first, chosen.provider);
         } else {
           setBalanceGen(null);
         }
       }
     } catch (err: unknown) {
+      if (!connectStillCurrent()) {
+        return;
+      }
       const classified = classifyWalletError(err);
       setError(classified.message);
     } finally {
-      setIsConnecting(false);
+      if (connectStillCurrent()) {
+        setIsConnecting(false);
+      }
     }
   };
 
   const disconnectWallet = () => {
+    bumpWalletEpoch();
+    sessionStatusRef.current = 'cleared';
     setAccount(null);
     setBalanceGen(null);
     setBalanceReadFailed(false);
     setError(null);
-    writeWalletSession(getLocalStorage(), { status: 'cleared', rdns: selectedRdns });
+    setIsConnecting(false);
+    writeWalletSession(getLocalStorage(), { status: 'cleared', rdns: selectedRdnsRef.current });
   };
 
   const switchToStudioNext = async () => {

@@ -1,6 +1,6 @@
 # CharterFlow // Industrial Intelligence Governance Frontend
 
-CharterFlow is a grant-treasury frontend for **GenLayer Studio Next (chain ID 61997)**. Live mode reads the verified CharterFlowCore deployment and shows RPC errors honestly. Design-preview fixtures stay behind an explicit toggle. Stage 2 on-chain readback is **INCONCLUSIVE**; this UI is not an end-to-end proven pilot.
+CharterFlow is a grant-treasury frontend for **GenLayer Studio development preview (chain ID 61997)**. The repo README is the steward guide. This directory is the Vercel root. Live mode reads contract `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`. Design-preview fixtures stay behind an explicit toggle. Creator close and refund have not been run.
 
 ---
 
@@ -48,7 +48,7 @@ npm run lint
 ### Truthful Live Mode (Default: Active)
 - By default, CharterFlow opens in **Truthful Live Mode** (`isDesignPreview = false`).
 - In this mode, no hardcoded sample records or fake round proposals are injected.
-- The public configuration targets the verified deployment at `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`. RPC failures display explicit errors; they are never presented as an empty chain. The intended funded round remains unverified until Stage 2 reconciliation passes.
+- The public configuration targets the verified deployment at `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`. RPC failures display explicit errors; they are never presented as an empty chain. Funded rounds on `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48` stay visible and labeled legacy. AI review and voting are closed on that address. Funded rounds on `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21` remain a separate recovery case.
 
 ### Design Preview Mode (Optional User Choice)
 - Users can explicitly toggle **DESIGN PREVIEW** on the navigation banner.

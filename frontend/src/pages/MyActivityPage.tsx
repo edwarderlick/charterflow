@@ -2,11 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useData } from '../services/dataAccess';
 import { useWallet } from '../context/WalletContext';
-import {
-  prepareActionTransaction,
-  type PreparedTransaction,
-} from '../services/transactionService';
+import { prepareActionTransaction, recordedActionBlocksResubmit } from '../services/transactionService';
 import { TransactionModal } from '../components/TransactionModal';
+import { useTxModalResume } from '../services/txModalSnapshot';
 import type { UserActivity } from '../types';
 
 export const MyActivityPage: React.FC = () => {
@@ -20,8 +18,7 @@ export const MyActivityPage: React.FC = () => {
 
   const [showZeroCreditView, setShowZeroCreditView] = useState(false);
   const [modalNotice, setModalNotice] = useState<string | null>(null);
-  const [preparedTx, setPreparedTx] = useState<PreparedTransaction | null>(null);
-  const [showTxModal, setShowTxModal] = useState<boolean>(false);
+  const { preparedTx, setPreparedTx, showTxModal, setShowTxModal, closeTxModal, initialSnapshot } = useTxModalResume();
   const [isPreparingTx, setIsPreparingTx] = useState<boolean>(false);
 
   useEffect(() => {
@@ -75,6 +72,13 @@ export const MyActivityPage: React.FC = () => {
     }
     if (!chainId || chainId !== 61997 || !isCorrectNetwork) {
       setModalNotice('Wallet network unverified. Switch to GenLayer Studio Next (Chain ID 61997) with an explicit click.');
+      return;
+    }
+    const blockingWithdraw = recordedActionBlocksResubmit('withdraw_credit', proposalId);
+    if (blockingWithdraw) {
+      setModalNotice(
+        `Withdrawal already recorded${blockingWithdraw.txId ? `: ${blockingWithdraw.txId}` : ''}. Read-only reconciliation is required. It cannot be submitted again.`
+      );
       return;
     }
     setIsPreparingTx(true);
@@ -689,9 +693,10 @@ export const MyActivityPage: React.FC = () => {
       <TransactionModal
         isOpen={showTxModal}
         onClose={() => {
-          setShowTxModal(false);
+          closeTxModal();
           setPreparedTx(null);
         }}
+        initialSnapshot={initialSnapshot}
         prepared={preparedTx}
         provider={provider}
         account={account || ''}

@@ -31,6 +31,21 @@ def _current_timestamp() -> u64:
 
 ZERO_ADDRESS_STR = "0x0000000000000000000000000000000000000000"
 MAX_PAGE_LIMIT = 50
+
+
+def _as_address(value) -> Address:
+    """Normalize public-method address input to a genuine Address before Address-typed storage.
+
+    Studio Next / genlayer-js calldata encodes Address parameters as 0x hex strings.
+    The pinned GenVM bootloader forwards those strings unchanged. AddrDesc.set requires
+    val.as_bytes, so a raw str crashes at storage write.
+    """
+    try:
+        return value if isinstance(value, Address) else Address(value)
+    except (TypeError, ValueError):
+        raise gl.vm.UserError("ERR_INVALID_ADDRESS")
+
+
 MAX_FULL_PAGE_LIMIT = 20
 DEFAULT_PAGE_LIMIT = 20
 ALLOWED_VERDICTS = {"ELIGIBLE", "INELIGIBLE", "NEEDS_CLARITY"}
@@ -230,13 +245,14 @@ class CharterFlowCore(gl.contract.Contract):
         seen = []
         roster_str_list = []
         for m in committee_roster:
-            m_str = str(m).lower()
+            m_addr = _as_address(m)
+            m_str = str(m_addr).lower()
             if m_str == ZERO_ADDRESS_STR:
                 raise gl.vm.UserError("ERR_ZERO_ADDRESS_IN_ROSTER")
             if m_str in seen:
                 raise gl.vm.UserError("ERR_DUPLICATE_ROSTER_ENTRY")
             seen.append(m_str)
-            roster_str_list.append(str(m))
+            roster_str_list.append(str(m_addr))
             self.roster_members[f"{round_id}:{m_str}"] = True
 
         if grant_cap_wei == 0 or grant_cap_wei > deposit:
@@ -257,7 +273,7 @@ class CharterFlowCore(gl.contract.Contract):
 
         round_data = Round(
             round_id=round_id,
-            creator=gl.message.sender_address,
+            creator=_as_address(gl.message.sender_address),
             title=title,
             description=description,
             charter_text=charter_text,
@@ -302,7 +318,7 @@ class CharterFlowCore(gl.contract.Contract):
         if r.state != "ACTIVE":
             raise gl.vm.UserError("ERR_ROUND_NOT_ACTIVE")
 
-        sender = gl.message.sender_address
+        sender = _as_address(gl.message.sender_address)
         if not self.roster_members.get(f"{round_id}:{str(sender).lower()}", False):
             raise gl.vm.UserError("ERR_SENDER_NOT_IN_COMMITTEE")
 
@@ -310,7 +326,8 @@ class CharterFlowCore(gl.contract.Contract):
         if now >= r.nomination_cutoff:
             raise gl.vm.UserError("ERR_NOMINATION_WINDOW_CLOSED")
 
-        if str(recipient).lower() == ZERO_ADDRESS_STR:
+        recipient_addr = _as_address(recipient)
+        if str(recipient_addr).lower() == ZERO_ADDRESS_STR:
             raise gl.vm.UserError("ERR_RECIPIENT_ZERO_ADDRESS")
 
         if requested_amount_wei == 0:
@@ -339,7 +356,7 @@ class CharterFlowCore(gl.contract.Contract):
             proposal_id=proposal_id,
             round_id=round_id,
             proposer=sender,
-            recipient=recipient,
+            recipient=recipient_addr,
             title=title,
             requested_amount_wei=requested_amount_wei,
             deliverables_text=deliverables_text,
@@ -434,7 +451,12 @@ class CharterFlowCore(gl.contract.Contract):
             except Exception:
                 return False
 
-        raw_eval = gl.vm.run_nondet_unsafe(leader_exec, validator_check)
+        # Pinned py-genlayer std kzr02ndm… exposes run_nondet and run_nondet_default.
+        # run_nondet_unsafe is absent. run_nondet returns the leader value only when
+        # validator_check returns True, so agreement is the categorical verdict itself.
+        # run_nondet_default can treat matching UserError/VMError pairs as agreement
+        # without that boolean, so it is not the verdict-equivalence API.
+        raw_eval = gl.vm.run_nondet(leader_exec, validator_check)
         parsed = json.loads(str(raw_eval))
         verdict = parsed.get("verdict", "NEEDS_CLARITY")
         if verdict not in ALLOWED_VERDICTS:
@@ -475,7 +497,7 @@ class CharterFlowCore(gl.contract.Contract):
             raise gl.vm.UserError("ERR_VOTING_WINDOW_CLOSED")
 
         r = self.rounds[p.round_id]
-        voter = gl.message.sender_address
+        voter = _as_address(gl.message.sender_address)
 
         # Check voter is on committee roster
         if not self.roster_members.get(f"{p.round_id}:{str(voter).lower()}", False):
@@ -595,7 +617,7 @@ class CharterFlowCore(gl.contract.Contract):
             raise gl.vm.UserError("ERR_ROUND_NOT_FOUND")
 
         r = self.rounds[round_id]
-        if gl.message.sender_address != r.creator:
+        if _as_address(gl.message.sender_address) != _as_address(r.creator):
             raise gl.vm.UserError("ERR_CALLER_NOT_ROUND_CREATOR")
 
         now = _current_timestamp()
@@ -637,7 +659,7 @@ class CharterFlowCore(gl.contract.Contract):
         if p.state != "APPROVED":
             raise gl.vm.UserError("ERR_PROPOSAL_NOT_APPROVED")
 
-        if gl.message.sender_address != p.recipient:
+        if _as_address(gl.message.sender_address) != _as_address(p.recipient):
             raise gl.vm.UserError("ERR_CALLER_NOT_RECIPIENT")
 
         amount = p.requested_amount_wei
@@ -659,7 +681,7 @@ class CharterFlowCore(gl.contract.Contract):
         self.rounds[p.round_id] = r
 
         # External Interaction: emit transfer message to chain-layer recipient
-        _Recipient(Address(p.recipient)).emit_transfer(value=amount)
+        _Recipient(_as_address(p.recipient)).emit_transfer(value=amount)
 
         return amount
 
@@ -674,7 +696,7 @@ class CharterFlowCore(gl.contract.Contract):
             raise gl.vm.UserError("ERR_ROUND_NOT_FOUND")
 
         r = self.rounds[round_id]
-        if gl.message.sender_address != r.creator:
+        if _as_address(gl.message.sender_address) != _as_address(r.creator):
             raise gl.vm.UserError("ERR_CALLER_NOT_ROUND_CREATOR")
 
         if r.state not in ("CLOSED", "REFUND_EMITTED"):
@@ -695,7 +717,7 @@ class CharterFlowCore(gl.contract.Contract):
         self.rounds[round_id] = r
 
         # External Interaction: emit transfer message to chain-layer creator
-        _Recipient(Address(r.creator)).emit_transfer(value=claimable)
+        _Recipient(_as_address(r.creator)).emit_transfer(value=claimable)
 
         return claimable
 

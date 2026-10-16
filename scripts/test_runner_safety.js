@@ -655,6 +655,7 @@ async function runTests() {
       txHash: '0xc5c220571c8d890c04715ce65cfd23ae92a0d49e696c596979591f771ab734e4',
       contractAddress: address,
       sourceCode: source,
+      expectedSourceHash: crypto.createHash('sha256').update(source).digest('hex'),
       saveEvidenceOption: false,
     });
     assert.strictEqual(readCalls, 4);
