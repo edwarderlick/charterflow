@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 248 32" fill="none" role="img" aria-label="CharterFlow">
+  <g>
+    <path fill="#FF5A1F" d="M2 3h10l4 4v16H2V3z"/>
+    <path fill="#FF5A1F" d="M13 8h9v4h-9z"/>
+    <path fill="#FF5A1F" d="M13 15h9v4h-9z"/>
+    <path fill="#FF5A1F" d="M20 19h4v5h-4z"/>
+    <path fill="#FF5A1F" d="M18 22h12v8H18z"/>
+  </g>
+  <text x="40" y="22" fill="#E5E2E1" font-family="Space Grotesk, Arial, Helvetica, sans-serif" font-size="18" font-weight="700" letter-spacing="0.4">CHARTERFLOW</text>
+</svg>

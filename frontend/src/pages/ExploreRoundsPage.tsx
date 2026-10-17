@@ -594,7 +594,7 @@ export const ExploreRoundsPage: React.FC = () => {
             </div>
             <div className="bg-[#141414] border border-[#222222] p-4 space-y-1">
               <span className="text-[#888884] block text-[10px]">LIVE REGISTRY</span>
-              <p className="text-[#e5e2e1] text-[11px]">The corrected contract starts with zero rounds. New create_round calls target this address only.</p>
+              <p className="text-[#e5e2e1] text-[11px]">The pilot round is verified on-chain. Open its live ledger for current balances; creator close and refund have not been tested.</p>
             </div>
           </div>
           )}

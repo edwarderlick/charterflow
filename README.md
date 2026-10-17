@@ -4,7 +4,7 @@ CharterFlow is a grant round on a GenLayer intelligent contract. A creator locks
 
 The charter check matters because the verdict is produced inside the contract, not pasted in from an off-chain review. The leader and validators must agree on the category. The stored reason records that agreement and states that a free-text rationale was not verified. A disagreement leaves the proposal unmoved.
 
-**Public demo:** not deployed. Connect this repository to Vercel, then replace this sentence with that deployment URL.
+**Public demo:** [https://charterflow-coral.vercel.app/](https://charterflow-coral.vercel.app/)
 
 **Contract:** [`0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`](https://explorer-studio-dev.genlayer.com/address/0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8)
 
@@ -86,7 +86,7 @@ npm run lint:frontend
 
 ## Vercel
 
-Do not treat this repository as already deployed.
+The connected project is [https://charterflow-coral.vercel.app/](https://charterflow-coral.vercel.app/). These are the import settings. This repository does not deploy itself.
 
 | Setting | Value |
 |---|---|

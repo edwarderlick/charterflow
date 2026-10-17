@@ -677,7 +677,7 @@ export const LandingPage: React.FC = () => {
         </div>
         <div>VALIDATION: GENLAYER INTELLIGENT CONTRACTS</div>
         <div className="hidden sm:inline">CHAIN ID: 61997</div>
-        <div className="text-[#ff5719] font-bold">DEPLOYED CORE // STAGE 2 UNVERIFIED</div>
+        <div className="text-[#ff5719] font-bold">VERIFIED PILOT // PAYOUT DELIVERED</div>
       </div>
     </div>
   );

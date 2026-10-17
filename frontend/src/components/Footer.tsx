@@ -9,9 +9,7 @@ export const Footer: React.FC = () => {
         {/* Brand & Barcode Column */}
         <div className="lg:col-span-4 flex flex-col gap-4">
           <div className="flex items-center gap-3">
-            <div className="h-8 w-8 bg-[#ff5719] flex items-center justify-center font-['Space_Grotesk'] text-[#521300] font-black text-sm">
-              CF
-            </div>
+            <img src="/brand/charterflow-mark.svg" alt="" width={32} height={32} className="h-8 w-8 shrink-0" />
             <span className="font-['Space_Grotesk'] text-lg uppercase tracking-tight text-[#e5e2e1] font-bold">
               CharterFlow
             </span>
@@ -127,7 +125,7 @@ export const Footer: React.FC = () => {
             </div>
             <div className="flex justify-between">
               <span className="text-[#888884]">STATUS</span>
-              <span className="text-[#ffb800] font-semibold">DEPLOYED / READBACK BLOCKED</span>
+              <span className="text-[#ff5719] font-semibold">VERIFIED PILOT · LIVE READS</span>
             </div>
           </div>
         </div>
@@ -137,10 +135,10 @@ export const Footer: React.FC = () => {
       <div className="max-w-7xl mx-auto pt-6 flex flex-col md:flex-row items-center justify-between gap-4 font-mono text-[10px] text-[#888884]">
         <div className="text-center md:text-left">
           <span className="text-[#ff5719] font-bold">DISCLAIMER:</span>{' '}
-          Testnet product. All amounts are test GEN. CharterFlowCore is deployed; funded round state remains unverified until Stage 2 reconciliation succeeds.
+          Studio development preview. Amounts are test GEN. The pilot payout was verified; check the live round ledger for current balances. Creator close and refund have not been tested. Preview state can be reset.
         </div>
         <div className="text-center md:text-right">
-          © 2025 CHARTERFLOW LABS. PROTOCOL OPERATING UNDER GENLAYER INTELLIGENT CONTRACT CONSENSUS.
+          © 2026 CHARTERFLOW LABS. PROTOCOL OPERATING UNDER GENLAYER INTELLIGENT CONTRACT CONSENSUS.
         </div>
       </div>
     </footer>

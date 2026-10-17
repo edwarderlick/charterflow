@@ -79,7 +79,7 @@ npm run lint
 
 ## Current Architecture Limitations
 
-- **Stage 2 Readback Gate**: Transaction `0x1476320746c0efda5f97d2db6256c571c6da7adff7c494af33031bf9adfb0bdc` finalized successfully, but the intended round has not passed complete independent state and balance reconciliation. Later pilot writes remain blocked.
+- **Verified round**: `round-open-source-rpc--mvb7nltc` on `0x5643…25C8` has 0.95 GEN available and 0.05 GEN withdrawn. Creator close and refund have not been tested. The older Stage 2 round `rnd-pilot-354517` on `0x408D…` remains a separate inconclusive recovery case.
 - **Network Error Truthfulness**: The current Studio Next `-32603` rollback-state error is rendered as a read failure, not as proof that no rounds exist.
 - **Preview Isolation**: Design-preview records remain clearly labeled fixtures and are never evidence about the deployed contract.
 - **Native Message Limitation**: A parent withdrawal receipt plus `PAYOUT_EMITTED` proves message emission, not recipient delivery, unless independent downstream evidence is available.

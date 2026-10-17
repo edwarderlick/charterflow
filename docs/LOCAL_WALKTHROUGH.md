@@ -1,3 +1,7 @@
+# Local Vite walkthrough (2026-10-14 snapshot)
+
+This note records the app before the verified `0x5643…25C8` round. It is not the current public state. The live round `round-open-source-rpc--mvb7nltc` has 0.95 GEN available and 0.05 GEN withdrawn. Creator close and refund have not been tested. See the repository README.
+
 # Local Vite walkthrough (before publish)
 
 Dev server: **http://127.0.0.1:5174/**

@@ -77,9 +77,13 @@ export const Header: React.FC = () => {
           <div className="flex items-center gap-6 lg:gap-10">
             {/* CF Brand Identity */}
             <Link to="/" className="flex items-center gap-3 group">
-              <div className="h-9 w-9 bg-[#ff5719] flex items-center justify-center font-['Space_Grotesk'] text-[#521300] font-black text-lg transition-transform group-hover:scale-105">
-                CF
-              </div>
+              <img
+                src="/brand/charterflow-mark.svg"
+                alt=""
+                width={36}
+                height={36}
+                className="h-9 w-9 shrink-0 transition-transform group-hover:scale-105"
+              />
               <div className="flex flex-col">
                 <span className="font-['Space_Grotesk'] text-lg uppercase tracking-tight text-[#e5e2e1] font-bold leading-tight">
                   CharterFlow

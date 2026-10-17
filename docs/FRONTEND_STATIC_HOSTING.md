@@ -1,6 +1,6 @@
-# Static-host plan for the Vite frontend (not deployed)
+# Static host for the Vite frontend
 
-Do not deploy in this pass. This is the packaging plan for a later public host.
+Public demo: [https://charterflow-coral.vercel.app/](https://charterflow-coral.vercel.app/). This repository does not deploy itself. Vercel builds the connected `frontend` directory.
 
 ## Build-time public settings
 
