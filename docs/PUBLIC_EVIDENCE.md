@@ -6,7 +6,7 @@ Sections below that name `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48` or `0x408D
 
 The earlier rounds `round-studio-next-rpc--mvarlewq` and `round-studio-next-rpc--mvas9jju` are each separate 1 GEN rounds on the legacy contract. Legacy Stage 2 on `0x408D…` remains separate.
 
-## Live corrected deployment
+## Historical legacy deployment (contract 0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48)
 
 | Fact | Value |
 |---|---|
@@ -24,7 +24,7 @@ The earlier rounds `round-studio-next-rpc--mvarlewq` and `round-studio-next-rpc-
 
 The deploy transaction's `data.contract_code` matches source SHA-256 `4ec11b1bee98122d3dad5ab86f5823d676797c1c0873133d386adeeba12b9b72`. That is the bytecode at `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48`. It cannot be patched. The working tree and `frontend/public/CharterFlowCore.py` are SHA-256 `4b146292c840cf16e0dcfd7b8d488492092d73c2c3160dda366f922642eaee78`, which is deployed at `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`, not at this legacy address.
 
-## Verified `create_round` on the corrected contract
+## Historical `create_round` on the legacy contract (0x9579…)
 
 Verdict: **VERIFIED**. Read-only retry after a temporary "all 8 execution slots occupied" error. No replacement transaction was sent.
 

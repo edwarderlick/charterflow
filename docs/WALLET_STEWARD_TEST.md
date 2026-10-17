@@ -1,7 +1,14 @@
 # Public wallet and steward testing — 2026-10-14
 
+> [!NOTE]
+> **Historical 2026-10-14 Walkthrough Note:**  
+> This document is a preserved historical record of the local steward and wallet walkthrough conducted on **2026-10-14** against local Vite (`http://127.0.0.1:5173/`).  
+> Statements below such as “Public origin: none”, historical test suite counts, and observed JSON-RPC `-32603` read errors are historical observations from that pass, **not current status**.  
+> The current verified deployment on chain `61997` is [`0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`](https://explorer-studio-dev.genlayer.com/address/0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8), with live public demo at [https://charterflow-coral.vercel.app/](https://charterflow-coral.vercel.app/), full verified lifecycle evidence in [`docs/evidence/verified-flow.json`](evidence/verified-flow.json), and current status documented in [README.md](../README.md) and [`docs/SUBMISSION_STATUS.md`](SUBMISSION_STATUS.md).  
+> The test results, matrix, and findings below are preserved unchanged as historical evidence and have not been rewritten.
+
 Local origin: `http://127.0.0.1:5173/` (Vite 8.3.4, node PID **28704**, command `vite.js --host 127.0.0.1`, HTTP 200). Port 5174 is not listening; no duplicate CharterFlow Vite process was found this run.  
-Public origin: **none**. No Vercel URL exists. Wallet-free and connect/network checks were not repeated on a public host.  
+Public origin: **none** *(historical 2026-10-14 observation; see current Vercel demo above)*. Wallet-free and connect/network checks were not repeated on a public host during this pass.  
 Portal: not submitted. This note is the 2026-10-14 walkthrough. Current source SHA-256 is `4b146292c840cf16e0dcfd7b8d488492092d73c2c3160dda366f922642eaee78` at `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`. The recovery source `34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee` remains on `0x408D…` only.
 
 ## Wallet types actually tested

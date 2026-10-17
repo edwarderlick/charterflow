@@ -33,27 +33,31 @@ The smallest workable improvement is to trust only the categorical verdict agree
 
 The contract change alters parsing and the stored review-reason string only. It does not add a contract call, external message, native transfer, or payable value. Claim methods still emit one native transfer message each. The source hash changed, so a fresh schema extraction, fee estimate, and deployment transaction are required for this candidate. The frontend continues to block claim submissions until the live message-fee budget is measured; no fee value is invented locally.
 
-## Current deployment and remaining pilot blockers
+## Historical 2026-10-13 deployment blockers (earlier contract 0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21)
 
-1. The exact candidate is deployed on Studio Next at `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`. Deployment transaction `0xc5c220571c8d890c04715ce65cfd23ae92a0d49e696c596979591f771ab734e4`, deployed code, schema, and source SHA-256 `34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee` were independently reconciled.
-2. The intended Stage 2 transaction `0x1476320746c0efda5f97d2db6256c571c6da7adff7c494af33031bf9adfb0bdc` is `FINALIZED` with `FINISHED_WITH_RETURN`, but `rnd-pilot-354517` remains unverified. Studio Next `get_round` reads return JSON-RPC `-32603`: `Can't reconnect until invalid transaction is rolled back.` A successful receipt, nonce change, registry entry, or balance change alone is insufficient. A 2026-10-14 PaymentSpike `get_state` control on independently confirmed address `0xD30E2Da70f4fD27B25c8aC65E67e30AC5a1fb513` also failed `gen_call` with `-32603` on both `latest-final` and `latest-nonfinal` (`control fails`). Stage 2 stays **INCONCLUSIVE**.
-3. No nomination, AI review, vote, withdrawal, payout emission, or refund has been tested against this deployment. Stage 3+ writes remain blocked until complete round, registry, genesis-ledger, and contract-balance reconciliation succeeds.
-4. A fresh network fee quote is required for every future write. Claims remain blocked until a reliable positive native-message fee estimate is measured; no fee value is invented locally.
+> [!NOTE]
+> The items and verdict below record the historical **2026-10-13** audit findings for earlier recovery deployment `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`. They do **not** describe the subsequent verified deployment at [`0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`](https://explorer-studio-dev.genlayer.com/address/0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8), which successfully executed the full verified flow documented in [README.md](../README.md) and [`docs/SUBMISSION_STATUS.md`](SUBMISSION_STATUS.md).
+
+1. The earlier recovery source was deployed on Studio Next at `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`. Deployment transaction `0xc5c220571c8d890c04715ce65cfd23ae92a0d49e696c596979591f771ab734e4`, deployed code, schema, and source SHA-256 `34ea0e374cfe68788067838cebf4ca0c226e139c713aca6e7345716b35aad5ee` were independently reconciled.
+2. The intended Stage 2 transaction `0x1476320746c0efda5f97d2db6256c571c6da7adff7c494af33031bf9adfb0bdc` is `FINALIZED` with `FINISHED_WITH_RETURN`, but `rnd-pilot-354517` remained unverified at that time. Studio Next `get_round` reads returned JSON-RPC `-32603`: `Can't reconnect until invalid transaction is rolled back.` A 2026-10-14 PaymentSpike `get_state` control on independently confirmed address `0xD30E2Da70f4fD27B25c8aC65E67e30AC5a1fb513` also failed `gen_call` with `-32603` on both `latest-final` and `latest-nonfinal` (`control fails`).
+3. No nomination, AI review, vote, withdrawal, payout emission, or refund was tested against that earlier recovery deployment.
+4. A fresh network fee quote is required for every write.
 5. Verdict-only agreement does not provide a consensus-verified semantic rationale, and prompt-injection behavior has not been adversarially demonstrated on the target validator/model configuration.
-6. Historical `dd04779...` deployment attempts failed with `DiskFull`; that evidence is preserved separately and must not be conflated with the current rollback-state read error.
+6. Historical `dd04779...` deployment attempts failed with `DiskFull`; that evidence is preserved separately and must not be conflated with the rollback-state read error.
 
-## Verification recorded in this pass
+## Verification recorded in 2026-10-13 pass
 
 - Contract direct-mode tests: `18/18` passed.
 - Frontend read tests: `91/91` passed (includes verified-address default when `VITE_CONTRACT_ADDRESS` is blank, plus explicit zero-address unconfigured behavior).
 - Frontend write tests: `108/108` passed, including the delayed-provider concurrent-submit regression.
-- Runner safety tests: `70/70` passed on 2026-10-14 (`npm run test:safety`), including write-mode halt without a local checkpoint and public read-fact attachment without `writeIntent`.
+- Runner safety tests: passed on 2026-10-14 (`npm run test:safety`), including write-mode halt without a local checkpoint and public read-fact attachment without `writeIntent`.
 - Remote schema extraction: passed with `18` methods for the current source.
 - Frontend lint: completed with pre-existing warnings and no errors.
 - Frontend production build: passed.
-- Read-only Studio Next probe at `2026-10-13T14:52:06.172Z`: chain `61997`, both historical deployment hashes not found, candidate address empty, creator nonce latest/pending `0/0`, decision `MAY_DEPLOY`. This proves a clean read-time recovery state, not database write health.
+- Read-only Studio Next probe at `2026-10-13T14:52:06.172Z`: chain `61997`, both historical deployment hashes not found, candidate address empty, creator nonce latest/pending `0/0`, decision `MAY_DEPLOY`. This proved a clean read-time recovery state, not database write health.
 
-## Pilot verdict
+## Historical 2026-10-13 pilot verdict
 
-**NO-GO for Stage 3+ writes while Stage 2 readback is unresolved.** The deployed source is identified exactly, but the funded round is not independently verified. This is also a NO-GO for portal submission or any claim of a proven live lifecycle, consensus-verified rationale, or native-token delivery.
+**NO-GO for Stage 3+ writes on 0x408D… while its Stage 2 readback was unresolved.** That earlier recovery contract was superseded by verified deployment `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`. Current status and verified lifecycle evidence are documented in [`docs/SUBMISSION_STATUS.md`](SUBMISSION_STATUS.md).
+
 

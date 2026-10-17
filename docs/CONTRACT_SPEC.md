@@ -3,7 +3,7 @@
 **Document Version:** 1.3.0-CORRECTED-AUDIT  
 **Runtime:** GenLayer Intelligent VM (Chain ID: 61997)  
 **Contract Paradigm:** GenLayer Python Intelligent Contract (`from genlayer import *`)  
-**Status:** Exact source deployed on Studio Next at `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`; Stage 2 funded-round state remains unverified because independent reads return JSON-RPC `-32603`
+**Status:** Source SHA-256 `4b146292c840cf16e0dcfd7b8d488492092d73c2c3160dda366f922642eaee78` deployed and verified on GenLayer Studio development preview (chain ID 61997) at contract `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`. Historical deployments at `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48` and `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21` are preserved separately as legacy/recovery cases.
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Document Version:** 1.3.0-LIVE-READS-ALIGNED  
 **Purpose:** Precise mapping between frontend UI components, the implemented GenLayer Python Intelligent Contract (`contracts/CharterFlowCore.py`), and the frontend live reads adapter (`TruthfulLiveDataAccessAdapter`).  
-**Status:** Live read adapter configured for corrected deployment `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48`; recovery rounds remain on `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`
+**Status:** Live read adapter configured for verified contract `0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`; legacy rounds remain visible on `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48`, and recovery rounds on `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21`
 
 ---
 

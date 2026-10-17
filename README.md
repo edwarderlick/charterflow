@@ -12,7 +12,7 @@ The charter check matters because the verdict is produced inside the contract, n
 
 This network is a development preview. Its state can be reset. This repository does not claim that a GenLayer Portal mission accepts chain `61997`. Check that mission's rules before submitting. Builder Portal is not submitted from here.
 
-A fresh read at `2026-10-16T21:58:07.162Z` is summarized in [`docs/evidence/verified-flow.json`](docs/evidence/verified-flow.json).
+A fresh read at `2026-10-16T21:58:07.162Z` is summarized in [`docs/evidence/verified-flow.json`](docs/evidence/verified-flow.json) and [`docs/SUBMISSION_STATUS.md`](docs/SUBMISSION_STATUS.md).
 
 ## Verified flow
 
@@ -116,4 +116,4 @@ These addresses are not the verified flow above.
 - Legacy `0x9579A19c2aD0a2DBd0B806Abb85bE9a2E6391E48` still runs source `4ec11b1bee98122d3dad5ab86f5823d676797c1c0873133d386adeeba12b9b72`. AI review and voting are closed. Its funded rounds stay visible for recovery.
 - Recovery `0x408DcCc27fC7b4455E82ffe78C824cda4A96ba21` still holds `rnd-pilot-354517` and `round-studio-next-rpc--mv9pwatt`. Do not nominate into them.
 
-History and diagnostics: [`docs/PUBLIC_EVIDENCE.md`](docs/PUBLIC_EVIDENCE.md), [`docs/CONTRACT_SPEC.md`](docs/CONTRACT_SPEC.md), [`docs/FRONTEND_STATIC_HOSTING.md`](docs/FRONTEND_STATIC_HOSTING.md), [`docs/LOCAL_WALKTHROUGH.md`](docs/LOCAL_WALKTHROUGH.md).
+History, status, and diagnostics: [`docs/SUBMISSION_STATUS.md`](docs/SUBMISSION_STATUS.md), [`docs/PUBLIC_EVIDENCE.md`](docs/PUBLIC_EVIDENCE.md), [`docs/CONTRACT_SPEC.md`](docs/CONTRACT_SPEC.md), [`docs/FRONTEND_STATIC_HOSTING.md`](docs/FRONTEND_STATIC_HOSTING.md), [`docs/LOCAL_WALKTHROUGH.md`](docs/LOCAL_WALKTHROUGH.md).
