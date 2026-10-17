@@ -64,4 +64,8 @@ The contracts below are earlier historical deployments. Their earlier readback p
    - Authenticated portal form requirements, contribution categories, and point structures have not been submitted against.
 5. **Portal network acceptance rules:**
    - Acceptance of chain `61997` (Studio development preview) depends entirely on the specific GenLayer Builder Portal mission rules. Reviewers and submitters must verify whether a mission requires Asimov testnet (chain `4221`) or accepts Studio Next (`61997`) before submitting.
+6. **Failed-child settlement is not proven:**
+   - The pilot's EOA withdrawal has a separately finalized and credited 0.05 GEN child transfer. That is the delivery proof for this one payout.
+   - `withdraw_credit` sets `PAYOUT_EMITTED` and marks the credit withdrawn when it emits the child message. The deployed contract has no demonstrated retry or recredit method for a child transfer that later fails. Do not present the parent state or direct-mode tests as proof that every recipient or failed child can be paid or recovered.
+   - The proof-by-case index and this limit are in [README.md](../README.md#steward-proof-map).
 

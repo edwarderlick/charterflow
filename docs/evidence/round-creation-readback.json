@@ -1,0 +1,78 @@
+{
+  "verdict": "VERIFIED",
+  "recordedAt": "2026-10-16T17:07:09.481Z",
+  "writesSent": 0,
+  "chainId": "0xf22d",
+  "contract": "0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8",
+  "evidenceSource": "app onSubmitted callback persisted to the local evidence listener",
+  "transaction": {
+    "hash": "0x753a915e0a882d403d0338a04ae4c9569e34eeb04afbd7b275b09c28128dd8d0",
+    "statusName": "FINALIZED",
+    "status": 7,
+    "txExecutionResultName": "FINISHED_WITH_RETURN",
+    "txExecutionResult": 1,
+    "from": "0xb3F7518df619ef485f7a1568ED3705bB6f5B0407",
+    "to": "0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8",
+    "valueWei": "1000000000000000000",
+    "nonce": 11,
+    "rawHash": "0x753a915e0a882d403d0338a04ae4c9569e34eeb04afbd7b275b09c28128dd8d0"
+  },
+  "roundId": "round-open-source-rpc--mvb7nltc",
+  "roundError": null,
+  "round": {
+    "state": "ACTIVE",
+    "title": "Open-Source RPC Health Dashboard",
+    "description": "Fund one open-source TypeScript dashboard that reads Studio Next RPC health and publishes the check result.",
+    "creator": "0xb3F7518df619ef485f7a1568ED3705bB6f5B0407",
+    "charterSha256": "3666ccdcdc40b90f0bbf1b852769b4e92f81f75160d94a2745661fbdff17af32",
+    "charterText": "CHARTER DIRECTIVES FOR: Open-Source RPC Health Dashboard\n\nSUMMARY: Fund one open-source TypeScript dashboard that reads Studio Next RPC health and publishes the check result.\n\nPERMITTED SCOPE:\n\n1. Publish the dashboard source under an OSI-approved license with setup instructions.\n\n2. Read Studio Next chain 61997 RPC health without custodial keys or seed phrases.\n\n3. Document the public endpoints checked and the expected public output.\n\nSTRICT EXCLUSIONS:\n\nEXCL-1: No closed-source dashboard build or custodial key handling.\n\nEXCL-2: No speculative token marketing, liquidity bots, or influencer promotions.",
+    "committeeRoster": [
+      "0xb3F7518df619ef485f7a1568ED3705bB6f5B0407",
+      "0x31e14df3b4f47F2428F3B78E7279691A78f70a05"
+    ],
+    "initialDepositWei": "1000000000000000000",
+    "grantCapWei": "100000000000000000",
+    "nominationCutoff": 1792774432,
+    "nominationCutoffUtc": "2026-10-23T16:53:52.000Z",
+    "votingDuration": 259200,
+    "roundEnd": 1793120032,
+    "roundEndUtc": "2026-10-27T16:53:52.000Z",
+    "createdAt": 1792169889,
+    "createdAtUtc": "2026-10-16T16:58:09.000Z",
+    "availableWei": "1000000000000000000",
+    "reservedWei": "0",
+    "approvedCreditsWei": "0",
+    "creatorClaimableWei": "0",
+    "payoutsEmittedWei": "0",
+    "refundsEmittedWei": "0",
+    "proposalNonce": 0
+  },
+  "registry": {
+    "get_round_ids_count": 1,
+    "get_round_ids": [
+      "round-open-source-rpc--mvb7nltc"
+    ]
+  },
+  "contractBalanceWei": "1000000000000000000",
+  "checks": {
+    "finalized": true,
+    "finishedWithReturn": true,
+    "roundId": true,
+    "creator": true,
+    "rosterOrder": true,
+    "deposit": true,
+    "cap": true,
+    "title": true,
+    "charter": true,
+    "registry": true,
+    "available": true,
+    "reserved": true,
+    "approved": true,
+    "payouts": true,
+    "refunds": true,
+    "claimable": true,
+    "contractBalance": true,
+    "stateActive": true
+  },
+  "uncertain": []
+}
