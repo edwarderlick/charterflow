@@ -1,0 +1,6 @@
+# Python 3.12 direct-mode test environment verified for the public contract tests.
+# The contract's Depends header separately pins the GenVM runner and stdlib.
+genlayer-test==0.29.2
+genlayer-py==0.16.3
+pytest==8.3.4
+cloudpickle==3.1.2

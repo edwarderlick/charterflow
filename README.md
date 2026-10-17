@@ -67,13 +67,22 @@ Round end is `2026-10-27T16:53:52Z` (`1793120032`). `close_round_and_refund` can
 
 ## Local setup
 
-Node.js 22 and npm. Python 3.12 and GenLayer `gltest` are needed only for `npm run test:contracts`.
+Node.js 22 and npm. Python 3.12 is needed only for `npm run test:contracts`; its tested direct-mode dependencies are pinned in [`requirements-test.txt`](requirements-test.txt). The contract's `Depends` header separately pins the GenVM runner and standard library. The direct-mode test runner downloads that pinned artifact on first use, so its first run needs network access. These tests do not execute a full WASM GenVM or a live wallet transaction.
 
 ```bash
 npm ci
 npm --prefix frontend ci
 cd frontend
 npm run dev
+```
+
+For the Python contract suite, create a Python 3.12 virtual environment, install `requirements-test.txt` into it, then run `npm run test:contracts` with that environment active. On Windows:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements-test.txt
+.\.venv\Scripts\Activate.ps1
+npm run test:contracts
 ```
 
 The dev server prints its URL, usually `http://127.0.0.1:5173/`. Another app may already own that port. CharterFlow has also been run with `npx vite --host 127.0.0.1 --port 5174 --strictPort` from `frontend/`.
@@ -86,7 +95,7 @@ Leave **PREVIEW DATA** off when you are checking live state.
 
 ## Tests and build
 
-From the repository root:
+From the repository root, after installing the Node and pinned Python test dependencies above. The [public verification workflow](.github/workflows/verify.yml) runs the contract, safety, frontend, wallet, create-round, and production-build checks from a fresh checkout. Its GitHub run status is the public execution record; local test counts alone are not CI evidence.
 
 ```bash
 npm test

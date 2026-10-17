@@ -26,6 +26,7 @@ artifacts/
 # Dependencies & Build artifacts
 node_modules/
 dist/
+.venv/
 .system_generated/
 .tempmediaStorage/
 __pycache__/
