@@ -32,8 +32,7 @@ PINNED_RUNNER = "5jycge4q8k23462jtb0b9fyey1s9qz928sz2nbrd9mg4sxqg2qng"
 PINNED_STD = "kzr02ndm9et4qkmbqpq5djjt5sme2yt76n7sz1qbzax0knt6mam0"
 STDLIB_NAMES = {"Address", "u256", "u64", "u32"}
 
-import gltest.direct.sdk_loader as sdk_loader
-sdk_loader.GITHUB_RELEASES_URL = "https://github.com/genlayerlabs/genvm-manager/releases"
+import tests.gltest_patch  # noqa: F401
 from gltest.direct.sdk_loader import setup_sdk_paths
 
 def _pin_contract_std_before_genlayer_import() -> None:

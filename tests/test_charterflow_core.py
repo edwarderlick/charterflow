@@ -11,8 +11,7 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 if str(WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_ROOT))
 
-import gltest.direct.sdk_loader as sdk_loader
-sdk_loader.GITHUB_RELEASES_URL = "https://github.com/genlayerlabs/genvm-manager/releases"
+import tests.gltest_patch  # noqa: F401
 from gltest.direct.sdk_loader import setup_sdk_paths
 setup_sdk_paths(version="v0.6.0-rc8")
 
