@@ -106,7 +106,7 @@ Leave **PREVIEW DATA** off when you are checking live state.
 
 ## Tests and build
 
-From the repository root, after installing the Node and pinned Python test dependencies above. The [public verification workflow](.github/workflows/verify.yml) runs the contract, safety, frontend, wallet, create-round, and production-build checks from a fresh checkout. Its passing public execution record is [GitHub Actions run 39008922965](https://github.com/edwarderlick/charterflow/actions/runs/39008922965); local test counts alone are not CI evidence.
+From the repository root, after installing the Node and pinned Python test dependencies above. The [public verification workflow](.github/workflows/verify.yml) runs the contract, safety, frontend, wallet, create-round, and production-build checks from a fresh checkout. Its passing public execution record is [GitHub Actions run 39155240702](https://github.com/edwarderlick/charterflow/actions/runs/39155240702); local test counts alone are not CI evidence.
 
 ```bash
 npm test
