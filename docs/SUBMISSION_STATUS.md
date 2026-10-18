@@ -48,24 +48,56 @@ The contracts below are earlier historical deployments. Their earlier readback p
 
 ## 3. Remaining limits & open boundaries
 
-1. **Creator close and refund have NOT been tested:**
-   - Neither `close_round_and_refund` nor `claim_creator_refund` has been executed on the verified deployment.
-   - There is no close transaction and no refund transaction. `refunds_emitted_wei` and `creator_claimable_wei` are both 0.
-   - The verified round remains in `ACTIVE` state.
+1. **Creator close and refund on live pilot:**
+   - Neither `close_round_and_refund` nor `claim_creator_refund` has been executed on the live pilot deployment because the round is active until `2026-10-27T16:53:52Z` (`1793120032`) and requires `reserved_wei == 0`.
+   - On the live pilot, there is no close transaction and no refund transaction; `refunds_emitted_wei` and `creator_claimable_wei` are both 0.
+   - **Local direct-mode test simulation (never a live demonstration):** The complete 10 GEN close and refund lifecycle has been proven strictly as a local direct-mode test simulation in `test_demonstrate_full_round_close_and_refund_lifecycle` (demonstrating expired reservation release, premature-close rejection, valid close, protected approved credits, creator claimable balance, refund emission, separate child credit, duplicate-refund rejection, and multi-round balance reconciliation). It is not a live network demonstration.
 2. **Round end deadline:**
    - Round `round-open-source-rpc--mvb7nltc` end is `2026-10-27T16:53:52Z` (`1793120032`).
    - By contract invariant, `close_round_and_refund` can only be invoked by the creator after `round_end` has elapsed AND `reserved_wei == 0`.
    - `claim_creator_refund` is a subsequent creator action after round status becomes `CLOSED`.
    - The remaining 0.95 GEN in the treasury cannot be claimed or refunded before this timestamp and contract conditions are satisfied.
-3. **Studio development preview stability:**
+3. **Consensus comparison scope & ELIGIBLE verdict definition:**
+   - "ELIGIBLE" means validator-backed alignment of the submitted deliverables description with the charter directives. It does **not** verify that work exists or is complete.
+   - Validators can reach the same category through materially conflicting interpretations of mandatory conditions (`test_validators_conflicting_interpretations_of_mandatory_conditions`). GenVM nondet consensus compares strictly the canonical verdict enum string (`"ELIGIBLE"`); it does not compare model reasoning, clause interpretations, or physical reality.
+   - A strengthened structured mandatory-condition assessment (comparing each sub-condition individually) is proven feasible in `test_structured_mandatory_condition_consensus_comparison`, which successfully catches and rejects conflicting condition evaluations that category-only consensus accepts.
+4. **Two-member roster recusal & unilateral approval risk:**
+   - When a 2-member roster includes the recipient, recipient recusal reduces eligible voters from 2 to 1 (`n_eligible = 1`).
+   - The 2/3 supermajority threshold becomes `(1 * 2 + 2) // 3 = 1` required YES vote (`test_two_member_roster_recipient_recusal_threshold`).
+   - The UI, README, and contract specifications prominently disclose that a 2-member roster with an on-roster recipient permits unilateral approval by the single remaining member.
+5. **Settlement safety & lack of failed-child recovery:**
+   - **Deployed contract invariant:** The deployed contract (`0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8` on chain 61997) has **not changed**.
+   - **Plain statement on recovery:** Both `withdraw_credit()` and `claim_creator_refund()` still have **NO failed-child recovery**.
+   - **Pinned runtime investigation:** As formally analyzed in [`docs/PAYOUT_SAFETY_DESIGN.md`](PAYOUT_SAFETY_DESIGN.md) and proven in `test_pinned_runtime_lacks_child_outcome_and_precludes_onchain_recovery`:
+     - `emit_transfer` delegates to `gl_call_generic({'EmitExternalMessage': ...})`, returning synchronously with `None`. No child transaction hash, status, or execution outcome is accessible to the contract.
+     - GenVM WASI exports only `{storage_read, storage_write, get_balance, get_self_balance, gl_call}`. It exposes zero EVM code introspection (no `extcodesize`, no `get_code`). An Intelligent Contract cannot verify whether an address is an EOA or a smart contract on-chain.
+     - According to official GenLayer documentation, failed child transfers do not return value to contract custody.
+     - Permitting on-chain retries after unreturned child failures would create a multi-round treasury drainage exploit where retried payouts are stolen from other rounds' deposits (`test_pinned_runtime_lacks_child_outcome_and_precludes_onchain_recovery`).
+     - Even restricting recipients to EOAs off-chain does **not** eliminate all failure modes (e.g., EVM gas price spikes, relayer failure, or block gas limit exhaustion still cause child transfer failure).
+     - Existing one-time emission guards (`credit_withdrawn = true`, `creator_claimable_wei = 0`) and UI status labels prevent double-spending, but do **not** constitute recovery of lost funds.
+   - The frontend implements a 6-state taxonomy (entitlement, transfer emitted, child pending, independently credited, failed, uncertain) and requires authoritative child proof (`triggered_by == parent`, `status == FINALIZED`, `value_credited == true`, exact recipient, and exact amount) before displaying delivery or workflow completion. `WORKFLOW COMPLETE` is strictly unavailable without independently credited child evidence.
+6. **Studio development preview stability:**
    - Chain `61997` is a development preview network. Node state, RPC availability, or chain history may reset without warning.
-4. **Portal submission has NOT happened:**
+7. **Portal submission and network acceptance:**
    - No Builder Portal submission has been filed from this repository or wallet.
-   - Authenticated portal form requirements, contribution categories, and point structures have not been submitted against.
-5. **Portal network acceptance rules:**
-   - Acceptance of chain `61997` (Studio development preview) depends entirely on the specific GenLayer Builder Portal mission rules. Reviewers and submitters must verify whether a mission requires Asimov testnet (chain `4221`) or accepts Studio Next (`61997`) before submitting.
-6. **Failed-child settlement is not proven:**
+   - Acceptance of chain `61997` depends entirely on specific Builder Portal mission rules. Submitters must check whether the target mission requires Asimov testnet (chain `4221`) or accepts Studio Next (`61997`).
+8. **Failed-child settlement limit:**
    - The pilot's EOA withdrawal has a separately finalized and credited 0.05 GEN child transfer. That is the delivery proof for this one payout.
-   - `withdraw_credit` sets `PAYOUT_EMITTED` and marks the credit withdrawn when it emits the child message. The deployed contract has no demonstrated retry or recredit method for a child transfer that later fails. Do not present the parent state or direct-mode tests as proof that every recipient or failed child can be paid or recovered.
-   - The proof-by-case index and this limit are in [README.md](../README.md#steward-proof-map).
+   - A failed child transfer and recovery from that failure are not proven on-chain. Do not present the parent state or passing tests as proof that every recipient or failed child can be paid or recovered.
+
+---
+
+## 4. Steward decision question & submission readiness
+
+Because true on-chain recovery is impossible on the pinned GenLayer runtime without introducing multi-round insolvency vulnerabilities, the project boundaries are defined by the following steward decision:
+
+> **Question for GenLayer Steward:**  
+> On the pinned GenLayer runtime (`v0.6.0-rc8`), Intelligent Contracts have no synchronous return from `emit_transfer`, no child transaction hash, no child execution callbacks, and no EVM bytecode introspection (`extcodesize`) to verify recipient address types on-chain. Furthermore, GenLayer protocol documentation confirms that failed child transfers do not return value to contract custody. Permitting on-chain retries without returned funds would violate multi-round balance conservation and drain funds from other rounds (`test_pinned_runtime_lacks_child_outcome_and_precludes_onchain_recovery`).  
+> Even if recipients are restricted to EOAs off-chain, chain-layer failure modes (gas surges, relayer drops, block limits) remain unrecoverable on-chain.  
+>  
+> *Is an EOA-restricted pilot with explicitly unrecoverable child failures acceptable for Portal mission compliance, or does the mission require an upstream GenVM runtime upgrade with native child outcome callbacks and value-return semantics before acceptance?*
+
+**Readiness Disclosure:**  
+CharterFlow is intentionally **NOT presented as ready for Portal resubmission or acceptance** until this steward decision is formally reviewed and resolved.
+
 

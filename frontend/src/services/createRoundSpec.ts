@@ -53,7 +53,8 @@ export function recipientRecusalThreshold(roster: string[], plannedRecipient: st
   if (recipient.length === 0) {
     formula = `No planned recipient yet. With no recusal, n_eligible = ${rosterSize} and required YES = (${rosterSize} * 2 + 2) // 3 = ${requiredYes}. A recipient who is on the roster is subtracted before that formula.`;
   } else if (recipientOnRoster) {
-    formula = `n_eligible = ${rosterSize} - 1 = ${eligibleCount} because ${recipient} is on the roster and recused. required YES = (${eligibleCount} * 2 + 2) // 3 = ${requiredYes}. Approval is ${requiredYes}-of-${eligibleCount}.`;
+    const unilateralNotice = eligibleCount === 1 ? ' [UNILATERAL APPROVAL: 2-member roster with recipient recusal leaves 1 eligible voter; a single YES vote approves the grant.]' : '';
+    formula = `n_eligible = ${rosterSize} - 1 = ${eligibleCount} because ${recipient} is on the roster and recused. required YES = (${eligibleCount} * 2 + 2) // 3 = ${requiredYes}. Approval is ${requiredYes}-of-${eligibleCount}.${unilateralNotice}`;
   } else {
     formula = `n_eligible = ${rosterSize} because ${recipient} is not on the roster. required YES = (${eligibleCount} * 2 + 2) // 3 = ${requiredYes}. Approval is ${requiredYes}-of-${eligibleCount}.`;
   }

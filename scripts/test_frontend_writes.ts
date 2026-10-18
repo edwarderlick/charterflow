@@ -2830,6 +2830,372 @@ async function runWriteTests() {
       'A genuine payout with matching delivery can show WORKFLOW COMPLETE'
     );
 
+    // Adverse and in-flight child transfer states for withdraw_credit
+    const withdrawPending = assessReceiptClaim(withdrawPrepared, { txId: payoutHash }, {
+      readStatus: 'ok',
+      sender: recipient,
+      contract: liveContract,
+      method: 'withdraw_credit',
+      args: [proposalId],
+      finalizedSuccess: true,
+      triggeredTxIds: [childHash],
+      proposalState: 'PAYOUT_EMITTED',
+      creditWithdrawn: true,
+      requestedAmountWei: credit,
+      childHash,
+      childRecipient: recipient,
+      childValueWei: credit,
+      childReadStatus: 'pending',
+      detail: 'the emitted child transfer is pending finalization on the chain layer',
+    });
+    assert(withdrawPending.claim === 'parent-matched' && withdrawPending.message.includes('pending'), 'In-flight child payout remains parent-matched and notes pending state');
+    assert(
+      modalReceiptFlags({
+        preparedAction: 'withdraw_credit',
+        currentTx: { txId: payoutHash, status: 'finalized-success' },
+        verificationVerified: true,
+        receipt: withdrawPending,
+        connectedAccount: recipient,
+        quotedAccount: recipient,
+      }).workflowComplete === false,
+      'Pending child transfer blocks WORKFLOW COMPLETE'
+    );
+
+    const withdrawFailed = assessReceiptClaim(withdrawPrepared, { txId: payoutHash }, {
+      readStatus: 'ok',
+      sender: recipient,
+      contract: liveContract,
+      method: 'withdraw_credit',
+      args: [proposalId],
+      finalizedSuccess: true,
+      triggeredTxIds: [childHash],
+      proposalState: 'PAYOUT_EMITTED',
+      creditWithdrawn: true,
+      requestedAmountWei: credit,
+      childHash,
+      childRecipient: recipient,
+      childValueWei: credit,
+      childReadStatus: 'failed',
+      detail: 'the emitted transfer failed or reverted on the chain layer',
+    });
+    assert(withdrawFailed.claim === 'parent-matched' && withdrawFailed.message.includes('failed or reverted'), 'Failed child payout remains parent-matched and notes failure');
+    assert(
+      modalReceiptFlags({
+        preparedAction: 'withdraw_credit',
+        currentTx: { txId: payoutHash, status: 'finalized-success' },
+        verificationVerified: true,
+        receipt: withdrawFailed,
+        connectedAccount: recipient,
+        quotedAccount: recipient,
+      }).workflowComplete === false,
+      'Failed child transfer blocks WORKFLOW COMPLETE'
+    );
+
+    const withdrawUncredited = assessReceiptClaim(withdrawPrepared, { txId: payoutHash }, {
+      readStatus: 'ok',
+      sender: recipient,
+      contract: liveContract,
+      method: 'withdraw_credit',
+      args: [proposalId],
+      finalizedSuccess: true,
+      triggeredTxIds: [childHash],
+      proposalState: 'PAYOUT_EMITTED',
+      creditWithdrawn: true,
+      requestedAmountWei: credit,
+      childHash,
+      childRecipient: recipient,
+      childValueWei: credit,
+      childValueCredited: false,
+      childReadStatus: 'ok',
+    });
+    assert(withdrawUncredited.claim === 'parent-matched' && withdrawUncredited.message.includes('value_credited is not true'), 'Uncredited child transfer remains parent-matched');
+
+    const withdrawConflictingTrigger = assessReceiptClaim(withdrawPrepared, { txId: payoutHash }, {
+      readStatus: 'ok',
+      sender: recipient,
+      contract: liveContract,
+      method: 'withdraw_credit',
+      args: [proposalId],
+      finalizedSuccess: true,
+      triggeredTxIds: [childHash],
+      proposalState: 'PAYOUT_EMITTED',
+      creditWithdrawn: true,
+      requestedAmountWei: credit,
+      childHash,
+      childRecipient: recipient,
+      childValueWei: credit,
+      childTriggeredBy: '0x9999999999999999999999999999999999999999999999999999999999999999',
+      childValueCredited: true,
+      childReadStatus: 'ok',
+    });
+    assert(
+      withdrawConflictingTrigger.claim === 'parent-matched' && withdrawConflictingTrigger.message.includes('does not match parent'),
+      'Child with conflicting parent trigger hash is rejected as delivery'
+    );
+
+    const withdrawConflictingRecipient = assessReceiptClaim(withdrawPrepared, { txId: payoutHash }, {
+      readStatus: 'ok',
+      sender: recipient,
+      contract: liveContract,
+      method: 'withdraw_credit',
+      args: [proposalId],
+      finalizedSuccess: true,
+      triggeredTxIds: [childHash],
+      proposalState: 'PAYOUT_EMITTED',
+      creditWithdrawn: true,
+      requestedAmountWei: credit,
+      childHash,
+      childRecipient: '0x8888888888888888888888888888888888888888',
+      childValueWei: credit,
+      childTriggeredBy: payoutHash,
+      childValueCredited: true,
+      childReadStatus: 'ok',
+    });
+    assert(
+      withdrawConflictingRecipient.claim === 'parent-matched' && withdrawConflictingRecipient.message.includes('is not'),
+      'Child with conflicting recipient address is rejected as delivery'
+    );
+
+    const withdrawConflictingAmount = assessReceiptClaim(withdrawPrepared, { txId: payoutHash }, {
+      readStatus: 'ok',
+      sender: recipient,
+      contract: liveContract,
+      method: 'withdraw_credit',
+      args: [proposalId],
+      finalizedSuccess: true,
+      triggeredTxIds: [childHash],
+      proposalState: 'PAYOUT_EMITTED',
+      creditWithdrawn: true,
+      requestedAmountWei: credit,
+      childHash,
+      childRecipient: recipient,
+      childValueWei: '100',
+      childTriggeredBy: payoutHash,
+      childValueCredited: true,
+      childReadStatus: 'ok',
+    });
+    assert(
+      withdrawConflictingAmount.claim === 'parent-matched' && withdrawConflictingAmount.message.includes('does not match credit'),
+      'Child with conflicting value is rejected as delivery'
+    );
+
+    // Test claim_creator_refund child resolution taxonomy
+    const roundId = 'round-open-source-rpc--mvb7nltc';
+    const refundAmount = '1000000000000000000'; // 1 GEN
+    const refundHash = '0x1212121212121212121212121212121212121212121212121212121212121212';
+    const refundChildHash = '0x3434343434343434343434343434343434343434343434343434343434343434';
+    const refundPrepared = {
+      action: 'claim_creator_refund',
+      targetIdentifier: `claim_creator_refund:${roundId}`,
+      compositeTargetKey: `${creator.toLowerCase()}:61997:${liveContract.toLowerCase()}:claim_creator_refund:${roundId}`,
+      roundId,
+      submitInput: {
+        kind: 'write',
+        address: liveContract,
+        method: 'claim_creator_refund',
+        args: [roundId],
+      },
+      quotedAccount: creator.toLowerCase(),
+      quotedChainId: 61997,
+      quotedContractAddress: liveContract.toLowerCase(),
+      quotedArgsJson: JSON.stringify({ kind: 'write', method: 'claim_creator_refund', args: [roundId] }),
+    } as PreparedTransaction;
+
+    const refundParentOnly = assessReceiptClaim(refundPrepared, { txId: refundHash }, {
+      readStatus: 'ok',
+      sender: creator,
+      contract: liveContract,
+      method: 'claim_creator_refund',
+      args: [roundId],
+      finalizedSuccess: true,
+      roundState: 'REFUND_EMITTED',
+      creatorClaimableWei: '0',
+      refundsEmittedWei: refundAmount,
+      childReadStatus: 'absent',
+    });
+    assert(refundParentOnly.claim === 'parent-matched', 'Creator refund without child transfer is parent-matched');
+    assert(
+      modalReceiptFlags({
+        preparedAction: 'claim_creator_refund',
+        currentTx: { txId: refundHash, status: 'finalized-success' },
+        verificationVerified: true,
+        receipt: refundParentOnly,
+        connectedAccount: creator,
+        quotedAccount: creator,
+      }).workflowComplete === false,
+      'Parent-only refund does not show WORKFLOW COMPLETE'
+    );
+
+    const refundChildPending = assessReceiptClaim(refundPrepared, { txId: refundHash }, {
+      readStatus: 'ok',
+      sender: creator,
+      contract: liveContract,
+      method: 'claim_creator_refund',
+      args: [roundId],
+      finalizedSuccess: true,
+      roundState: 'REFUND_EMITTED',
+      creatorClaimableWei: '0',
+      refundsEmittedWei: refundAmount,
+      childHash: refundChildHash,
+      childReadStatus: 'pending',
+      detail: 'the emitted child transfer is pending finalization on the chain layer',
+    });
+    assert(refundChildPending.claim === 'parent-matched' && refundChildPending.message.includes('pending'), 'In-flight child refund is parent-matched');
+
+    const refundChildFailed = assessReceiptClaim(refundPrepared, { txId: refundHash }, {
+      readStatus: 'ok',
+      sender: creator,
+      contract: liveContract,
+      method: 'claim_creator_refund',
+      args: [roundId],
+      finalizedSuccess: true,
+      roundState: 'REFUND_EMITTED',
+      creatorClaimableWei: '0',
+      refundsEmittedWei: refundAmount,
+      childHash: refundChildHash,
+      childReadStatus: 'failed',
+      detail: 'the emitted transfer failed or reverted on the chain layer',
+    });
+    assert(refundChildFailed.claim === 'parent-matched' && refundChildFailed.message.includes('failed or reverted'), 'Failed child refund is parent-matched and reports failure');
+
+    const refundDelivered = assessReceiptClaim(refundPrepared, { txId: refundHash }, {
+      readStatus: 'ok',
+      sender: creator,
+      contract: liveContract,
+      method: 'claim_creator_refund',
+      args: [roundId],
+      finalizedSuccess: true,
+      triggeredTxIds: [refundChildHash],
+      roundState: 'REFUND_EMITTED',
+      creatorClaimableWei: '0',
+      refundsEmittedWei: refundAmount,
+      childHash: refundChildHash,
+      childRecipient: creator,
+      childValueWei: refundAmount,
+      childValueCredited: true,
+      childReadStatus: 'ok',
+    });
+    assert(refundDelivered.claim === 'delivered', 'A matching child transfer delivers the creator refund');
+    assert(refundDelivered.claim === 'delivered' && refundDelivered.childHash === refundChildHash, 'Refund reports child transaction hash');
+    assert(
+      modalReceiptFlags({
+        preparedAction: 'claim_creator_refund',
+        currentTx: { txId: refundHash, status: 'finalized-success' },
+        verificationVerified: true,
+        receipt: refundDelivered,
+        connectedAccount: creator,
+        quotedAccount: creator,
+      }).workflowComplete === true,
+      'A genuine creator refund with matching delivery shows WORKFLOW COMPLETE'
+    );
+
+    const refundUncredited = assessReceiptClaim(refundPrepared, { txId: refundHash }, {
+      readStatus: 'ok',
+      sender: creator,
+      contract: liveContract,
+      method: 'claim_creator_refund',
+      args: [roundId],
+      finalizedSuccess: true,
+      triggeredTxIds: [refundChildHash],
+      roundState: 'REFUND_EMITTED',
+      creatorClaimableWei: '0',
+      refundsEmittedWei: refundAmount,
+      childHash: refundChildHash,
+      childRecipient: creator,
+      childValueWei: refundAmount,
+      childValueCredited: false,
+      childReadStatus: 'ok',
+    });
+    assert(refundUncredited.claim === 'parent-matched' && refundUncredited.message.includes('value_credited is not true'), 'Uncredited refund child transfer remains parent-matched');
+
+    const refundConflictingTrigger = assessReceiptClaim(refundPrepared, { txId: refundHash }, {
+      readStatus: 'ok',
+      sender: creator,
+      contract: liveContract,
+      method: 'claim_creator_refund',
+      args: [roundId],
+      finalizedSuccess: true,
+      triggeredTxIds: [refundChildHash],
+      roundState: 'REFUND_EMITTED',
+      creatorClaimableWei: '0',
+      refundsEmittedWei: refundAmount,
+      childHash: refundChildHash,
+      childRecipient: creator,
+      childValueWei: refundAmount,
+      childTriggeredBy: '0x9999999999999999999999999999999999999999999999999999999999999999',
+      childValueCredited: true,
+      childReadStatus: 'ok',
+    });
+    assert(
+      refundConflictingTrigger.claim === 'parent-matched' && refundConflictingTrigger.message.includes('does not match parent'),
+      'Refund child with conflicting parent trigger hash is rejected as delivery'
+    );
+
+    const refundConflictingRecipient = assessReceiptClaim(refundPrepared, { txId: refundHash }, {
+      readStatus: 'ok',
+      sender: creator,
+      contract: liveContract,
+      method: 'claim_creator_refund',
+      args: [roundId],
+      finalizedSuccess: true,
+      triggeredTxIds: [refundChildHash],
+      roundState: 'REFUND_EMITTED',
+      creatorClaimableWei: '0',
+      refundsEmittedWei: refundAmount,
+      childHash: refundChildHash,
+      childRecipient: '0x8888888888888888888888888888888888888888',
+      childValueWei: refundAmount,
+      childTriggeredBy: refundHash,
+      childValueCredited: true,
+      childReadStatus: 'ok',
+    });
+    assert(
+      refundConflictingRecipient.claim === 'parent-matched' && refundConflictingRecipient.message.includes('is not'),
+      'Refund child with conflicting recipient address is rejected as delivery'
+    );
+
+    const refundConflictingAmount = assessReceiptClaim(refundPrepared, { txId: refundHash }, {
+      readStatus: 'ok',
+      sender: creator,
+      contract: liveContract,
+      method: 'claim_creator_refund',
+      args: [roundId],
+      finalizedSuccess: true,
+      triggeredTxIds: [refundChildHash],
+      roundState: 'REFUND_EMITTED',
+      creatorClaimableWei: '0',
+      refundsEmittedWei: refundAmount,
+      childHash: refundChildHash,
+      childRecipient: creator,
+      childValueWei: '100',
+      childTriggeredBy: refundHash,
+      childValueCredited: true,
+      childReadStatus: 'ok',
+    });
+    assert(
+      refundConflictingAmount.claim === 'parent-matched' && refundConflictingAmount.message.includes('does not match refund'),
+      'Refund child with conflicting value is rejected as delivery'
+    );
+
+    const refundUncertainChild = assessReceiptClaim(refundPrepared, { txId: refundHash }, {
+      readStatus: 'ok',
+      sender: creator,
+      contract: liveContract,
+      method: 'claim_creator_refund',
+      args: [roundId],
+      finalizedSuccess: true,
+      roundState: 'REFUND_EMITTED',
+      creatorClaimableWei: '0',
+      refundsEmittedWei: refundAmount,
+      childHash: refundChildHash,
+      childReadStatus: 'uncertain',
+      detail: 'the emitted transfer could not be read',
+    });
+    assert(
+      refundUncertainChild.claim === 'parent-matched' && refundUncertainChild.message.includes('could not be read'),
+      'Uncertain child status keeps creator refund as parent-matched'
+    );
+
     const blockedFee = payoutFeeNotice('withdraw_credit', 0n);
     const measuredFee = payoutFeeNotice('withdraw_credit', 1n);
     assert(blockedFee?.tone === 'blocked' && blockedFee.text.includes('Zero or missing'), 'A zero message fee keeps the blocking warning');

@@ -28,10 +28,15 @@ export interface ObservedChainAction {
   creditWithdrawn?: boolean;
   requestedAmountWei?: string;
   payoutsEmittedWei?: string;
+  roundState?: string;
+  creatorClaimableWei?: string;
+  refundsEmittedWei?: string;
   childHash?: string;
   childRecipient?: string;
   childValueWei?: string;
-  childReadStatus?: 'ok' | 'uncertain' | 'absent';
+  childReadStatus?: 'ok' | 'uncertain' | 'absent' | 'pending' | 'failed';
+  childTriggeredBy?: string;
+  childValueCredited?: boolean;
 }
 
 export type ReceiptClaim =
@@ -251,7 +256,7 @@ export function assessReceiptClaim(
     };
   }
 
-  if (prepared.action !== 'withdraw_credit') {
+  if (prepared.action !== 'withdraw_credit' && prepared.action !== 'claim_creator_refund') {
     return {
       claim: 'delivered',
       hash,
@@ -260,43 +265,76 @@ export function assessReceiptClaim(
     };
   }
 
+  const isWithdraw = prepared.action === 'withdraw_credit';
+  const actionLabel = isWithdraw ? 'Withdrawal' : 'Creator refund';
   const deliveryProblems: string[] = [];
-  if (observed.proposalState !== 'PAYOUT_EMITTED') {
-    deliveryProblems.push(`proposal state is ${observed.proposalState || 'unknown'}, not PAYOUT_EMITTED`);
+
+  if (isWithdraw) {
+    if (observed.proposalState !== 'PAYOUT_EMITTED') {
+      deliveryProblems.push(`proposal state is ${observed.proposalState || 'unknown'}, not PAYOUT_EMITTED`);
+    }
+    if (observed.creditWithdrawn !== true) {
+      deliveryProblems.push('credit_withdrawn is not true');
+    }
+  } else {
+    if (observed.roundState !== 'REFUND_EMITTED') {
+      deliveryProblems.push(`round state is ${observed.roundState || 'unknown'}, not REFUND_EMITTED`);
+    }
+    if (observed.creatorClaimableWei !== undefined && observed.creatorClaimableWei !== '0') {
+      deliveryProblems.push(`creator_claimable_wei is ${observed.creatorClaimableWei}, not 0`);
+    }
   }
-  if (observed.creditWithdrawn !== true) {
-    deliveryProblems.push('credit_withdrawn is not true');
-  }
-  if (observed.childReadStatus === 'uncertain') {
+
+  const expectedAmount = isWithdraw ? observed.requestedAmountWei : observed.refundsEmittedWei;
+
+  if (observed.childReadStatus === 'failed') {
+    deliveryProblems.push(observed.detail || 'the emitted transfer failed or reverted on the chain layer');
+  } else if (observed.childReadStatus === 'pending') {
+    deliveryProblems.push(observed.detail || 'the emitted child transfer is pending finalization on the chain layer');
+  } else if (observed.childReadStatus === 'uncertain') {
     deliveryProblems.push(observed.detail || 'the emitted transfer could not be read');
   } else if (!observed.childHash || observed.childReadStatus === 'absent') {
     deliveryProblems.push('no emitted transfer or child transaction was found');
   } else {
+    if (
+      hash &&
+      observed.childTriggeredBy &&
+      observed.childTriggeredBy.toLowerCase() !== hash.toLowerCase()
+    ) {
+      deliveryProblems.push(
+        `child triggered_by ${observed.childTriggeredBy} does not match parent ${hash}`
+      );
+    }
     if (!sameAddress(observed.childRecipient, signer)) {
       deliveryProblems.push(`child recipient ${observed.childRecipient || 'unknown'} is not ${signer}`);
     }
     if (
-      !observed.requestedAmountWei ||
+      !expectedAmount ||
       !observed.childValueWei ||
-      observed.childValueWei !== observed.requestedAmountWei
+      observed.childValueWei !== expectedAmount
     ) {
       deliveryProblems.push(
-        `child value ${observed.childValueWei || 'missing'} does not match credit ${observed.requestedAmountWei || 'missing'}`
+        `child value ${observed.childValueWei || 'missing'} does not match ${isWithdraw ? 'credit' : 'refund'} ${expectedAmount || 'missing'}`
       );
     }
+    if (observed.childValueCredited === false) {
+      deliveryProblems.push('child transfer value_credited is not true');
+    }
   }
+
   if (deliveryProblems.length) {
     return {
       claim: 'parent-matched',
       hash,
-      message: `Withdrawal parent ${hash} matches the recipient call, but delivery is not proven. ${deliveryProblems.join('; ')}. Parent finalization is not recipient delivery. Another submit is blocked pending reconciliation.`,
+      message: `${actionLabel} parent ${hash} matches the ${isWithdraw ? 'recipient' : 'creator'} call, but delivery is not proven. ${deliveryProblems.join('; ')}. Parent finalization is not recipient delivery. Another submit is blocked pending reconciliation.`,
     };
   }
+
   return {
     claim: 'delivered',
     hash,
     childHash: observed.childHash || hash,
-    message: `Withdrawal ${hash} matches withdraw_credit. Child ${observed.childHash} paid ${observed.childValueWei} wei to ${observed.childRecipient}. Proposal is PAYOUT_EMITTED and credit_withdrawn is true.`,
+    message: `${actionLabel} ${hash} matches ${prepared.action}. Child ${observed.childHash} paid ${observed.childValueWei} wei to ${observed.childRecipient}. ${isWithdraw ? 'Proposal is PAYOUT_EMITTED and credit_withdrawn is true.' : 'Round is REFUND_EMITTED and creator_claimable_wei is 0.'}`,
   };
 }
 
@@ -382,32 +420,68 @@ async function readChildTransfer(
   client: ReturnType<typeof studioClient>,
   ids: string[],
   recipient: string,
-  amountWei: string | undefined
-): Promise<Pick<ObservedChainAction, 'childHash' | 'childRecipient' | 'childValueWei' | 'childReadStatus' | 'detail'>> {
+  amountWei: string | undefined,
+  parentHash?: string
+): Promise<Pick<ObservedChainAction, 'childHash' | 'childRecipient' | 'childValueWei' | 'childReadStatus' | 'childTriggeredBy' | 'childValueCredited' | 'detail'>> {
   if (!ids.length) return { childReadStatus: 'absent', detail: 'triggered_transactions is empty' };
   let uncertain = false;
+  let foundPending = false;
+  let foundFailed = false;
+  let failDetail = '';
+
   for (const id of ids) {
     try {
-      const child = (await client.getTransaction({ hash: id as `0x${string}` & { length: 66 } })) as Record<string, unknown>;
+      const child = (await client.getTransaction({ hash: id as `0x${string}` & { length: 66 } })) as Record<string, unknown> | null;
+      if (!child) continue;
       const childRecipient = contractOf(child);
       const childValue = valueOf(child);
+      const childStatus = String(child.statusName || child.status || '').toUpperCase();
+      const childExecution = String(child.txExecutionResultName || child.executionResult || child.execution || '').toUpperCase();
+      const childTriggeredBy = String(child.triggered_by || child.triggeredBy || '').toLowerCase();
+      const childValueCredited = child.value_credited === true || child.valueCredited === true;
+
       if (sameAddress(childRecipient, recipient) && amountWei && childValue === amountWei) {
-        return {
-          childHash: id,
-          childRecipient,
-          childValueWei: childValue,
-          childReadStatus: 'ok',
-        };
+        if (parentHash && childTriggeredBy && childTriggeredBy !== parentHash.toLowerCase()) {
+          continue;
+        }
+        if (childStatus === 'PENDING' || !childStatus) {
+          foundPending = true;
+          continue;
+        }
+        if (childExecution === 'FINISHED_WITH_ERROR' || childExecution === 'FAILED' || child.reverted === true) {
+          foundFailed = true;
+          failDetail = `Child transaction ${id} failed with ${childExecution || 'REVERT'}.`;
+          continue;
+        }
+        if (
+          childStatus === 'FINALIZED' &&
+          (childExecution === 'NOT_VOTED' || childExecution === 'FINISHED_WITH_RETURN' || childExecution === 'SUCCESS') &&
+          childValueCredited
+        ) {
+          return {
+            childHash: id,
+            childRecipient,
+            childValueWei: childValue,
+            childReadStatus: 'ok',
+            childTriggeredBy: childTriggeredBy || parentHash,
+            childValueCredited: true,
+          };
+        }
       }
-    } catch (err: unknown) {
+    } catch {
       uncertain = true;
-      void err;
     }
+  }
+  if (foundFailed) {
+    return { childReadStatus: 'failed', detail: failDetail || 'Child transfer failed on chain layer.' };
+  }
+  if (foundPending) {
+    return { childReadStatus: 'pending', detail: 'Child transfer is pending on chain layer.' };
   }
   if (uncertain) {
     return { childReadStatus: 'uncertain', detail: 'A child transaction id was present but could not be read.' };
   }
-  return { childReadStatus: 'absent', detail: 'Child transactions did not show the recipient credit transfer.' };
+  return { childReadStatus: 'absent', detail: 'Child transactions did not show a finalized, credited transfer matching recipient and amount.' };
 }
 
 export async function readChainAction(
@@ -433,45 +507,86 @@ export async function readChainAction(
       finalizedSuccess: statusName === 'FINALIZED' && execution === 'FINISHED_WITH_RETURN',
       triggeredTxIds: triggered,
     };
-    if (prepared.action !== 'withdraw_credit' || identity.method !== 'withdraw_credit') return observed;
-    try {
-      const proposal = (await client.readContract({
-        address: prepared.quotedContractAddress as `0x${string}`,
-        functionName: 'get_proposal',
-        args: [prepared.proposalId || ''],
-        jsonSafeReturn: true,
-        transactionHashVariant: TransactionHashVariant.LATEST_FINAL,
-      })) as Record<string, unknown>;
-      observed.proposalState = typeof proposal?.state === 'string' ? proposal.state : undefined;
-      observed.creditWithdrawn = proposal?.credit_withdrawn === true;
-      observed.requestedAmountWei =
-        proposal?.requested_amount_wei !== undefined ? String(proposal.requested_amount_wei) : undefined;
-      const roundId = typeof proposal?.round_id === 'string' ? proposal.round_id : prepared.roundId;
-      if (roundId) {
-        const round = (await client.readContract({
+    if (
+      (prepared.action !== 'withdraw_credit' && prepared.action !== 'claim_creator_refund') ||
+      (identity.method !== 'withdraw_credit' && identity.method !== 'claim_creator_refund')
+    ) {
+      return observed;
+    }
+
+    if (prepared.action === 'withdraw_credit') {
+      try {
+        const proposal = (await client.readContract({
           address: prepared.quotedContractAddress as `0x${string}`,
-          functionName: 'get_round',
-          args: [roundId],
+          functionName: 'get_proposal',
+          args: [prepared.proposalId || ''],
           jsonSafeReturn: true,
           transactionHashVariant: TransactionHashVariant.LATEST_FINAL,
         })) as Record<string, unknown>;
-        observed.payoutsEmittedWei =
-          round?.payouts_emitted_wei !== undefined ? String(round.payouts_emitted_wei) : undefined;
+        observed.proposalState = typeof proposal?.state === 'string' ? proposal.state : undefined;
+        observed.creditWithdrawn = proposal?.credit_withdrawn === true;
+        observed.requestedAmountWei =
+          proposal?.requested_amount_wei !== undefined ? String(proposal.requested_amount_wei) : undefined;
+        const roundId = typeof proposal?.round_id === 'string' ? proposal.round_id : prepared.roundId;
+        if (roundId) {
+          const round = (await client.readContract({
+            address: prepared.quotedContractAddress as `0x${string}`,
+            functionName: 'get_round',
+            args: [roundId],
+            jsonSafeReturn: true,
+            transactionHashVariant: TransactionHashVariant.LATEST_FINAL,
+          })) as Record<string, unknown>;
+          observed.payoutsEmittedWei =
+            round?.payouts_emitted_wei !== undefined ? String(round.payouts_emitted_wei) : undefined;
+        }
+      } catch (err: unknown) {
+        return {
+          ...observed,
+          readStatus: 'uncertain',
+          detail: `Withdrawal identity was read, but proposal readback failed: ${String((err as { message?: string })?.message || err)}`,
+        };
       }
-    } catch (err: unknown) {
-      return {
-        ...observed,
-        readStatus: 'uncertain',
-        detail: `Withdrawal identity was read, but proposal readback failed: ${String((err as { message?: string })?.message || err)}`,
-      };
+      const child = await readChildTransfer(
+        client,
+        triggered,
+        expectedSigner(prepared),
+        observed.requestedAmountWei,
+        hash
+      );
+      return { ...observed, ...child };
     }
-    const child = await readChildTransfer(
-      client,
-      triggered,
-      expectedSigner(prepared),
-      observed.requestedAmountWei
-    );
-    return { ...observed, ...child };
+
+    if (prepared.action === 'claim_creator_refund') {
+      try {
+        const round = (await client.readContract({
+          address: prepared.quotedContractAddress as `0x${string}`,
+          functionName: 'get_round',
+          args: [prepared.roundId || ''],
+          jsonSafeReturn: true,
+          transactionHashVariant: TransactionHashVariant.LATEST_FINAL,
+        })) as Record<string, unknown>;
+        observed.roundState = typeof round?.state === 'string' ? round.state : undefined;
+        observed.creatorClaimableWei =
+          round?.creator_claimable_wei !== undefined ? String(round.creator_claimable_wei) : undefined;
+        observed.refundsEmittedWei =
+          round?.refunds_emitted_wei !== undefined ? String(round.refunds_emitted_wei) : undefined;
+      } catch (err: unknown) {
+        return {
+          ...observed,
+          readStatus: 'uncertain',
+          detail: `Creator refund identity was read, but round readback failed: ${String((err as { message?: string })?.message || err)}`,
+        };
+      }
+      const child = await readChildTransfer(
+        client,
+        triggered,
+        expectedSigner(prepared),
+        observed.refundsEmittedWei,
+        hash
+      );
+      return { ...observed, ...child };
+    }
+    return observed;
   } catch (err: unknown) {
     return {
       readStatus: 'uncertain',

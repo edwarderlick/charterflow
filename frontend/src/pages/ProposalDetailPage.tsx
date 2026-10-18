@@ -677,6 +677,11 @@ export const ProposalDetailPage: React.FC = () => {
                   </span>
                 </div>
 
+                <div className="p-3 bg-[#00e599]/10 border border-[#00e599]/30 text-[#00e599] text-[11px] leading-relaxed" data-testid="verdict-scope-notice">
+                  <span className="font-bold uppercase tracking-wider block text-[10px] text-[#00e599] mb-0.5">VERDICT CLASSIFICATION NOTICE:</span>
+                  &ldquo;ELIGIBLE&rdquo; denotes validator-backed alignment of the submitted deliverables description with the charter directives. It does NOT verify that work exists or is complete.
+                </div>
+
                 <div className="space-y-3">
                   {proposal.aiEvaluation.ruleMatches.map((match, idx) => (
                     <div key={idx} className="p-3 bg-[#0e0e0e] border border-[#2a2a2a] space-y-1">
@@ -727,8 +732,19 @@ export const ProposalDetailPage: React.FC = () => {
               </div>
 
               {isRecipientOnCommittee && (
-                <div className="p-2 bg-[#ff5719]/10 border border-[#ff5719]/40 text-[#ff5719] text-[10px]">
-                  RECUSAL ACTIVE: Recipient is a registered committee member. Voting pool reduced from {rawCommitteeSize} to {eligibleVotersCount} eligible voters.
+                <div className="p-2.5 bg-[#ff5719]/10 border border-[#ff5719]/40 text-[#ff5719] text-[11px] space-y-1.5" data-testid="recusal-active-notice">
+                  <div className="font-bold flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px]">gavel</span>
+                    RECUSAL ACTIVE: Recipient is a registered committee member.
+                  </div>
+                  <div className="text-[#c8c6c2]">
+                    Voting pool reduced from {rawCommitteeSize} to {eligibleVotersCount} eligible voter{eligibleVotersCount === 1 ? '' : 's'}. Required YES: {requiredYes}.
+                  </div>
+                  {eligibleVotersCount === 1 && (
+                    <div className="mt-1 p-2 bg-[#201f1f] border border-[#ff5719] text-[#ffb596] font-bold text-[10px] leading-relaxed" data-testid="unilateral-approval-notice">
+                      ⚠️ UNILATERAL APPROVAL DISCLOSURE: A 2-member roster with recipient recusal leaves exactly 1 eligible voter and requires 1 YES vote ({requiredYes}-of-{eligibleVotersCount}). The sole remaining committee member can unilaterally approve this grant.
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -45,7 +45,11 @@ def _pin_contract_std_before_genlayer_import() -> None:
     # Direct-mode wasi is not the GenVM. The pinned std treats a wasi module
     # without FAKE_VM as an in-VM boot and then reads calldata from stdin.
     wasi = sys.modules.get("_genlayer_wasi")
-    if wasi is not None and not getattr(wasi, "FAKE_VM", False):
+    if wasi is None:
+        from gltest.direct import wasi_mock
+        sys.modules["_genlayer_wasi"] = wasi_mock
+        wasi = wasi_mock
+    if not getattr(wasi, "FAKE_VM", False):
         setattr(wasi, "FAKE_VM", True)
     for name in list(sys.modules):
         if name == "genlayer" or name.startswith("genlayer."):
@@ -89,6 +93,13 @@ def _pinned_std_dir() -> Path:
 
 
 def _reload_pinned_vm():
+    wasi = sys.modules.get("_genlayer_wasi")
+    if wasi is None:
+        from gltest.direct import wasi_mock
+        sys.modules["_genlayer_wasi"] = wasi_mock
+        wasi = wasi_mock
+    if not getattr(wasi, "FAKE_VM", False):
+        setattr(wasi, "FAKE_VM", True)
     std_dir = _pinned_std_dir()
     import genlayer as gl
     import genlayer.vm as vm_mod

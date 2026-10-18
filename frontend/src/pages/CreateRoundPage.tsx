@@ -631,6 +631,18 @@ export const CreateRoundPage: React.FC = () => {
                 <p className="font-mono text-[10px] text-[#888884]" data-testid="approval-threshold">
                   {totalCommittee} valid · {roster.invalid.length} invalid · {approval.formula} Eligible voters: {approval.eligibleVoters.join(', ') || 'none'}.
                 </p>
+                {approval.recipientOnRoster && approval.eligibleCount === 1 && (
+                  <div className="p-3 bg-[#ff5719]/15 border border-[#ff5719] text-[#ffb596] font-mono text-xs space-y-1">
+                    <div className="font-bold text-[#ff5719] flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[16px]">warning</span>
+                      UNILATERAL APPROVAL DISCLOSURE (2-MEMBER ROSTER WITH RECIPIENT RECUSAL)
+                    </div>
+                    <p className="text-[11px] leading-relaxed">
+                      The planned recipient is on the 2-member committee. Recusal leaves exactly 1 eligible voter ({approval.eligibleVoters[0] || 'remaining member'}).
+                      The 2/3 supermajority formula requires <strong>1 YES vote</strong> (1-of-1). The sole remaining committee member can unilaterally approve grants.
+                    </p>
+                  </div>
+                )}
                 <div>
                   <span className="font-mono text-xs text-[#e5e2e1] uppercase font-bold block mb-2">VOTING WINDOW (DAYS)</span>
                   <div className="grid grid-cols-3 gap-2 font-mono text-xs">

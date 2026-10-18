@@ -656,6 +656,17 @@ export const RoundDetailPage: React.FC = () => {
               </span>
             </div>
 
+            <div className="p-2.5 bg-[#0e0e0e] border border-[#2a2a2a] font-mono text-[11px] text-[#888884] space-y-1">
+              <div>
+                <span className="text-[#ff5719] font-bold">RECUSAL RULE:</span> When an on-roster recipient is nominated, they are strictly recused (<span className="text-[#e5e2e1]">n_eligible = roster - 1</span>). Threshold: <span className="text-[#e5e2e1]">(n_eligible * 2 + 2) // 3</span>.
+              </div>
+              {round.totalVoters === 2 && (
+                <div className="text-[#ffb596] pt-1 border-t border-[#2a2a2a]">
+                  ⚠️ <strong>2-Member Roster Disclosure:</strong> If an on-roster member is nominated, recusal leaves 1 eligible voter and requires 1 YES vote (1-of-1), allowing unilateral approval.
+                </div>
+              )}
+            </div>
+
             {/* Search Filter */}
             <div className="flex items-center bg-[#0e0e0e] border border-[#2a2a2a] px-3 py-1.5">
               <span className="material-symbols-outlined text-[#888884] text-[16px] mr-2">search</span>
@@ -747,6 +758,11 @@ export const RoundDetailPage: React.FC = () => {
               >
                 ALL ({proposals.length})
               </button>
+            </div>
+
+            <div className="p-2.5 bg-[#0e0e0e] border border-[#2a2a2a] font-mono text-[11px] text-[#00e599] flex items-center gap-2">
+              <span className="material-symbols-outlined text-[15px] text-[#00e599]">info</span>
+              <span><strong>VERDICT DISCLOSURE:</strong> &ldquo;ELIGIBLE&rdquo; denotes validator-backed alignment of the submitted deliverables description with the charter. It does not verify that work exists or is complete.</span>
             </div>
           </div>
 
@@ -848,6 +864,11 @@ export const RoundDetailPage: React.FC = () => {
                                   className="h-full bg-[#ff5719]"
                                 />
                               </div>
+                              {isRecipientOnCommittee && eligibleCount === 1 && (
+                                <div className="text-[10px] text-[#ffb596] bg-[#201f1f] p-1.5 border border-[#ff5719]/40 leading-snug">
+                                  ⚠️ Recipient recused: 1 eligible voter, 1 required YES (unilateral approval)
+                                </div>
+                              )}
                               <div className="flex gap-2 pt-2">
                                 <Link
                                   to={`/proposals/${proposal.id}`}
