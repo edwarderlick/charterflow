@@ -1857,17 +1857,17 @@ def test_two_member_roster_recipient_recusal_threshold():
 
 
 # ==============================================================================
-# 22. Full Round Close and Refund Lifecycle Local Direct-Mode Test Simulation (Never a Live Demonstration)
+# 22. Full Round Close and Refund Lifecycle Direct-Mode Mock Simulation (Arithmetic Example; Never a Live Demonstration)
 # ==============================================================================
 
-def test_demonstrate_full_round_close_and_refund_lifecycle():
+def test_direct_mode_mock_round_close_and_refund_lifecycle():
     """
-    Local direct-mode unit test simulation of the complete close and refund lifecycle
-    on an isolated test round (never a live demonstration):
-    - Initial deposit: 10 GEN (local direct-mode test simulation only)
+    Direct-mode mock unit test simulation of the complete close and refund lifecycle
+    on an isolated test round (arithmetic example with 10 GEN simulated deposit; never a live demonstration):
+    - Initial deposit: 10 GEN (direct-mode mock test simulation only; distinct from live 0.05 GEN child transfer)
     - Proposal A: Approved for 3 GEN credit
     - Proposal B: Nominated for 2 GEN reservation, not voted before cutoff -> expired reservation
-    - Premature close rejection before round_end (reverts ERR_ROUND_NOT_ENDED)
+    - Premature close rejection before round_end (reverts ERR_ROUND_NOT_YET_ENDED)
     - Expired reservation release after round_end (settle_expired_proposal releases 2 GEN to available)
     - Valid close: close_round_and_refund transitions 7 GEN unallocated funds to creator_claimable_wei
     - Protected approved credits: 3 GEN credit remains protected and withdrawable after round is CLOSED
@@ -1879,12 +1879,12 @@ def test_demonstrate_full_round_close_and_refund_lifecycle():
     - Duplicate withdrawal rejection: second withdraw_credit reverts ERR_CREDIT_ALREADY_WITHDRAWN
     - Final ledger & balance reconciliation:
       initial_deposit == payouts_emitted (3 GEN) + refunds_emitted (7 GEN) == 10 GEN.
-      contract.balance == 0. All invariants hold in local unit simulation.
+      contract.balance == 0. All invariants hold in local direct-mode mock unit simulation.
     """
     vm = VMContext()
     with vm.activate():
         core = deploy_core(vm)
-        dep = gl.u256(10 * 10**18)  # 10 GEN
+        dep = gl.u256(10 * 10**18)  # 10 GEN arithmetic example
         prop_a_amt = gl.u256(3 * 10**18)  # 3 GEN
         prop_b_amt = gl.u256(2 * 10**18)  # 2 GEN
         now_ts = get_current_time()
@@ -1895,7 +1895,7 @@ def test_demonstrate_full_round_close_and_refund_lifecycle():
             core.create_round(
                 round_id="rnd-full-lifecycle",
                 title="Full Lifecycle Close and Refund Round",
-                description="Testing complete round close and refund lifecycle",
+                description="Testing complete round close and refund lifecycle in direct-mode mock",
                 charter_text=DEFAULT_CHARTER,
                 committee_roster=[MEMBER_A, MEMBER_B],
                 grant_cap_wei=dep,
@@ -2047,20 +2047,27 @@ def test_demonstrate_full_round_close_and_refund_lifecycle():
 def test_pinned_runtime_lacks_child_outcome_and_precludes_onchain_recovery():
     """
     Executable proof of pinned GenLayer runtime (v0.6.0-rc8) transfer limitations:
-    1. emit_transfer delegates to EmitExternalMessage, returning synchronously None.
+    1. The current emit_transfer path delegates to EmitExternalMessage, returning synchronously None.
        No child transaction hash, status, or execution outcome is accessible to the contract.
     2. GenVM WASI provides no EVM code-inspection API (no extcodesize/get_code);
        the contract cannot verify whether a recipient address is an EOA or a complex contract.
-    3. If an emitted child transfer fails on the EVM layer, GenLayer does not return value
+    3. If an emitted child transfer fails on the EVM layer, failed value is not automatically returned
        to contract custody.
     4. Proves why on-chain retries cannot be implemented without double-spend vulnerabilities:
        if credit_withdrawn were not set immediately upon emission, repeated calls would emit
        duplicate transfers and drain multi-round deposits.
+    5. Proof that an unfunded retry breaks round solvency:
+       If a contract retries an unreturned payout, it must deduct the funds from contract balance,
+       which reduces assets below liabilities for other rounds:
+       contract.balance < sum_R (available + reserved + approved + creator_claimable).
+       This mathematically breaks multi-round solvency and steals other rounds' deposits.
+    6. Distinction: The successful 0.05 GEN live child transfer (tx 0x6e01...d6f0 on chain 61997)
+       is clearly distinguished from these local direct-mode unit test simulations.
     """
     vm = VMContext()
     with vm.activate():
         core = deploy_core(vm)
-        dep = gl.u256(5 * 10**18)
+        dep = gl.u256(5 * 10**18)  # 5 GEN direct-mode arithmetic example
         cutoff, duration, round_end = valid_round_times()
 
         with as_caller(CREATOR, value=dep):
@@ -2140,7 +2147,7 @@ def test_pinned_runtime_lacks_child_outcome_and_precludes_onchain_recovery():
         # 6. Multi-round conservation proof against on-chain retries:
         # If a contract allowed retrying a failed child transfer without funds being credited back,
         # it would create a multi-round insolvency vector.
-        dep2 = gl.u256(10 * 10**18)  # 10 GEN for Round 2
+        dep2 = gl.u256(10 * 10**18)  # 10 GEN for Round 2 (direct-mode arithmetic example)
         with as_caller(CREATOR, value=dep2):
             core.create_round(
                 round_id="rnd-second-round-limits",
@@ -2173,13 +2180,19 @@ def test_pinned_runtime_lacks_child_outcome_and_precludes_onchain_recovery():
 
 
 # ==============================================================================
-# 24. Structured Mandatory-Condition Consensus Comparison Feasibility
+# 24. Standalone Structured Mandatory-Condition Consensus Comparison Feasibility
 # ==============================================================================
 
-def test_structured_mandatory_condition_consensus_comparison():
+def test_standalone_structured_mandatory_condition_consensus_comparison_feasibility():
     """
-    Demonstrate how structured mandatory-condition evaluation compares against the
+    Standalone direct-mode feasibility test only:
+    Demonstrates how structured mandatory-condition evaluation compares against the
     current deployed categorical-only comparison.
+
+    IMPORTANT ARCHITECTURAL DISTINCTION:
+    - The deployed contract (0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8) compares ONLY the category string ('ELIGIBLE').
+    - This test is a standalone local feasibility demonstration of how future contract versions
+      could enforce consensus over individual sub-conditions.
 
     Current Deployed Pilot (0x5643...):
     - Leader emits: {"verdict": "ELIGIBLE"}
@@ -2187,7 +2200,7 @@ def test_structured_mandatory_condition_consensus_comparison():
     - If validators disagree on why (e.g. conflicting interpretations of mandatory conditions),
       consensus still passes because sub-conditions are discarded before comparison.
 
-    Strengthened Structured Assessment (Feasibility Proof):
+    Strengthened Structured Assessment (Standalone Feasibility Proof):
     - Leader emits structured breakdown:
       {"verdict": "ELIGIBLE", "open_source": true, "verifiable_tests": true}
     - Validator independently parses conditions and compares EVERY mandatory condition.

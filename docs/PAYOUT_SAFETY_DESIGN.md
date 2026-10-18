@@ -29,7 +29,7 @@ evm_contract_interface = contract_generator(
 )
 ```
 - Calling `_Recipient(address).emit_transfer(value=amount)` dispatches an `EmitExternalMessage` request to the WASI host.
-- The handler returns `None` synchronously. **There is no return value, no transaction hash, and no callback**.
+- The handler returns `None` synchronously. **The current `emit_transfer` path provides no child result to this contract**: there is no transaction hash, no execution outcome, and no callback.
 - The external transfer (child transaction) is scheduled for asynchronous execution on the EVM/chain layer after the Intelligent Contract parent transaction finalizes.
 
 ### 1.2 Child Transaction Identity and Finality
@@ -41,12 +41,19 @@ evm_contract_interface = contract_generator(
 - Official GenLayer value-transfer documentation establishes:
   > *"External transactions are executed asynchronously on the EVM layer. If the transaction fails, the sent amount is not automatically returned to the contract."*
 - When `emit_transfer(value=amount)` executes, `amount` is deducted from `self.balance`.
-- If the child transaction reverts on the EVM side (e.g. out of gas, unpayable contract recipient, or relayer fault), the funds remain debited from the contract's EVM balance. The protocol provides **no automatic return, no rollback, and no failure notification** to the sending Intelligent Contract.
+- If the child transaction reverts on the EVM side (e.g. out of gas, unpayable contract recipient, or relayer fault), the funds remain debited from the contract's EVM balance. The protocol provides **no automatic return, no rollback, and no failure notification** to the sending Intelligent Contract. Failed value is not automatically returned to contract custody.
 
-### 1.4 Impossibility of On-Chain Recovery on this Runtime
+### 1.4 Impossibility of On-Chain Recovery & Round Solvency Breakdown
 - Because the Intelligent Contract receives no callback and no return of funds upon child transaction failure, **true on-chain recovery of lost or failed child transfers cannot be implemented on the pinned GenLayer runtime**.
-- Attempting to permit an on-chain "retry" by re-emitting funds would require deducting funds from other rounds' deposits or remaining liquid balances, violating round isolation and the total treasury conservation invariant.
+- Attempting to permit an on-chain "retry" by re-emitting funds without returned custody would create a catastrophic solvency violation:
+  $$\text{contract.balance} < \sum_{R \in \text{Rounds}} \left( \text{available\_wei}_R + \text{reserved\_wei}_R + \text{approved\_credits\_wei}_R + \text{creator\_claimable\_wei}_R \right)$$
+  An unfunded retry deducts unreturned value from the shared contract balance, which steals funds from other rounds' deposits and causes protocol-wide insolvency.
 - **Rule of Truthfulness**: Any claim that CharterFlow implements "on-chain recovery" for failed child transfers is false. The system must enforce defensible settlement restrictions and truthfully declare what remains impossible.
+
+### 1.5 Distinction Between Live Evidence, Direct-Mode Mocks, and Feasibility Tests
+- **Live On-Chain Evidence**: The successful 0.05 GEN live child transfer (tx [`0x6e012d41c822b321271b194318121a240681d4568087d06a63ffb4e882b6d6f0`](https://explorer-studio-dev.genlayer.com/tx/0x6e012d41c822b321271b194318121a240681d4568087d06a63ffb4e882b6d6f0), triggered by parent withdraw [`0x0f29c0f7523d74aa89d8e93cbb995c19d69191052ea8e1893de3656fec032c6a`](https://explorer-studio-dev.genlayer.com/tx/0x0f29c0f7523d74aa89d8e93cbb995c19d69191052ea8e1893de3656fec032c6a) on chain 61997) is finalized and verified. It must be kept strictly distinguished from local unit simulations.
+- **Direct-Mode Mock Arithmetic Examples**: Lifecycle tests (such as the 10 GEN simulated round in `test_direct_mode_mock_round_close_and_refund_lifecycle` and the multi-round conservation proofs in `test_pinned_runtime_lacks_child_outcome_and_precludes_onchain_recovery`) are direct-mode mock arithmetic examples executed inside a local mock harness; they are NOT live chain transactions.
+- **Standalone Feasibility Tests vs. Deployed Consensus**: The structured-condition consensus comparison (`test_standalone_structured_mandatory_condition_consensus_comparison_feasibility`) is strictly a standalone feasibility test. The deployed contract (`0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8`) continues to compare only the categorical verdict string (`"ELIGIBLE"`).
 
 ---
 
