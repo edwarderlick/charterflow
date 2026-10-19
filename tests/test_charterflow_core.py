@@ -2173,8 +2173,9 @@ def test_pinned_runtime_lacks_child_outcome_and_precludes_onchain_recovery():
         # Thus, any on-chain retry would drain Round 2's deposit.
         # This proves why on-chain recovery cannot be safely implemented on this runtime.
 
-        # 7. Proof that EOA restriction does not eliminate all failure modes:
-        # Even if recipient is restricted to an EOA off-chain, native transfers on the EVM layer
+        # 7. Proof that hypothetical EOA restriction does not eliminate all failure modes:
+        # CharterFlow does not currently enforce an EOA-only recipient rule in contract code.
+        # Even as a hypothetical restriction, native transfers on the EVM layer
         # can still fail due to out-of-gas, gas price spikes, relayer failure, or block gas limit exhaustion.
         # Since unreturned funds remain lost, an EOA restriction alone cannot guarantee successful delivery.
 

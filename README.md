@@ -53,10 +53,10 @@ The deployed contract (`0x56438445435F7cbf3e585Ca9227df8fC2dAe25C8` on chain 619
 Because true on-chain recovery is impossible on the pinned GenLayer runtime without introducing multi-round insolvency vulnerabilities, the project boundaries require steward resolution:
 
 > **Question for GenLayer Steward:**  
-> On the pinned GenLayer runtime (`v0.6.0-rc8`), Intelligent Contracts have no synchronous return from `emit_transfer`, no child transaction hash, no child execution callbacks, and no EVM bytecode introspection (`extcodesize`) to verify recipient address types on-chain. Furthermore, GenLayer protocol documentation confirms that failed child transfers do not return value to contract custody. Permitting an unfunded retry would break round solvency and drain funds from other rounds (`test_pinned_runtime_lacks_child_outcome_and_precludes_onchain_recovery`).  
-> Even if recipients are restricted to EOAs off-chain, chain-layer failure modes (gas surges, relayer drops, block limits) remain unrecoverable on-chain.  
+> On the pinned GenLayer runtime (`v0.6.0-rc8`), Intelligent Contracts have no synchronous return from `emit_transfer`, no child transaction hash, no child execution callbacks, and no EVM bytecode introspection (`extcodesize`) to verify recipient address types on-chain. Furthermore, GenLayer protocol documentation confirms that failed child transfers do not return value to contract custody. Permitting an unfunded retry would break round solvency and drain funds from other rounds (`test_pinned_runtime_lacks_child_outcome_and_precludes_onchain_recovery`). Local direct-mode mock tests prove local arithmetic invariants, but do not prove live failure recovery or live close/refund.  
+> CharterFlow does not currently enforce an EOA-only recipient rule. Even as a hypothetical restriction, an EOA constraint would still leave chain-layer child transfer failures (gas price surges, relayer timeouts, block gas limit exhaustion) possible and unrecoverable on-chain.  
 >  
-> *Is an EOA-restricted pilot with explicitly unrecoverable child failures acceptable for Portal mission compliance, or does the mission require an upstream GenVM runtime upgrade with native child outcome callbacks and value-return semantics before acceptance?*
+> *Is this explicitly disclosed, unrecoverable failed-child limitation acceptable for Portal mission compliance on this pinned runtime; if not, which protocol-supported settlement mechanism is required?*
 
 **Readiness Disclosure:** CharterFlow is intentionally **NOT presented as ready for Portal resubmission or acceptance** until this steward decision is formally reviewed and resolved.
 
